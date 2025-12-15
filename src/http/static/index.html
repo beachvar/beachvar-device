@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BeachVar Device</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #4facfe;
+            margin-bottom: 5px;
+        }
+
+        .logo span {
+            color: #00f2fe;
+        }
+
+        .subtitle {
+            color: rgba(255,255,255,0.6);
+            font-size: 0.9rem;
+        }
+
+        .status-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .status-card h2 {
+            font-size: 1rem;
+            color: rgba(255,255,255,0.6);
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+        }
+
+        .status-item {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .status-item .label {
+            font-size: 0.75rem;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .status-item .value {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .status-item .unit {
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.5);
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .connection-status.online {
+            background: rgba(46, 213, 115, 0.2);
+            color: #2ed573;
+        }
+
+        .connection-status.offline {
+            background: rgba(255, 71, 87, 0.2);
+            color: #ff4757;
+        }
+
+        .connection-status .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .cameras-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .camera-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .camera-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .camera-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+
+        .camera-details h3 {
+            font-size: 1rem;
+            margin-bottom: 4px;
+        }
+
+        .camera-details .path {
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.5);
+            font-family: monospace;
+        }
+
+        .camera-status {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .camera-status.available {
+            background: rgba(46, 213, 115, 0.2);
+            color: #2ed573;
+        }
+
+        .camera-status.streaming {
+            background: rgba(255, 165, 2, 0.2);
+            color: #ffa502;
+        }
+
+        .camera-status.error {
+            background: rgba(255, 71, 87, 0.2);
+            color: #ff4757;
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border-radius: 8px;
+            border: none;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(79, 172, 254, 0.4);
+        }
+
+        .btn-danger {
+            background: rgba(255, 71, 87, 0.2);
+            color: #ff4757;
+            border: 1px solid rgba(255, 71, 87, 0.3);
+        }
+
+        .btn-danger:hover {
+            background: rgba(255, 71, 87, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: rgba(255,255,255,0.5);
+        }
+
+        .empty-state .icon {
+            font-size: 3rem;
+            margin-bottom: 16px;
+        }
+
+        footer {
+            text-align: center;
+            padding: 30px 0;
+            color: rgba(255,255,255,0.3);
+            font-size: 0.8rem;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top-color: #4facfe;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .refresh-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            border: none;
+            color: #fff;
+            font-size: 1.5rem;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(79, 172, 254, 0.4);
+            transition: all 0.2s;
+        }
+
+        .refresh-btn:hover {
+            transform: scale(1.1);
+        }
+
+        .refresh-btn:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">Beach<span>Var</span></div>
+            <div class="subtitle">Device Control Panel</div>
+        </header>
+
+        <div id="connection-status" class="connection-status offline">
+            <span class="dot"></span>
+            <span id="connection-text">Conectando...</span>
+        </div>
+
+        <div class="status-card">
+            <h2>Sistema</h2>
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="label">CPU</div>
+                    <div class="value"><span id="cpu-usage">--</span><span class="unit">%</span></div>
+                </div>
+                <div class="status-item">
+                    <div class="label">Memoria</div>
+                    <div class="value"><span id="memory-usage">--</span><span class="unit">%</span></div>
+                </div>
+                <div class="status-item">
+                    <div class="label">Temperatura</div>
+                    <div class="value"><span id="temperature">--</span><span class="unit">°C</span></div>
+                </div>
+                <div class="status-item">
+                    <div class="label">Uptime</div>
+                    <div class="value" id="uptime">--</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="status-card">
+            <h2>Cameras</h2>
+            <div id="cameras-container">
+                <div class="loading">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="status-card">
+            <h2>Acoes</h2>
+            <div class="actions">
+                <button class="btn btn-primary" onclick="refreshData()">
+                    Atualizar
+                </button>
+                <button class="btn btn-danger" onclick="restartDevice()">
+                    Reiniciar Device
+                </button>
+            </div>
+        </div>
+
+        <footer>
+            BeachVar Device v1.0 | <span id="device-id">--</span>
+        </footer>
+    </div>
+
+    <button class="refresh-btn" onclick="refreshData()" title="Atualizar">
+        ↻
+    </button>
+
+    <script>
+        let refreshInterval;
+
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                updateConnectionStatus(true);
+                document.getElementById('device-id').textContent = data.device_id || '--';
+
+                return data;
+            } catch (error) {
+                console.error('Error fetching status:', error);
+                updateConnectionStatus(false);
+                return null;
+            }
+        }
+
+        async function fetchSystem() {
+            try {
+                const response = await fetch('/api/system');
+                const data = await response.json();
+
+                document.getElementById('cpu-usage').textContent = data.cpu_percent?.toFixed(1) || '--';
+                document.getElementById('memory-usage').textContent = data.memory_percent?.toFixed(1) || '--';
+                document.getElementById('temperature').textContent = data.temperature?.toFixed(1) || '--';
+                document.getElementById('uptime').textContent = formatUptime(data.uptime_seconds);
+
+                return data;
+            } catch (error) {
+                console.error('Error fetching system:', error);
+                return null;
+            }
+        }
+
+        async function fetchCameras() {
+            try {
+                const response = await fetch('/api/cameras');
+                const data = await response.json();
+
+                renderCameras(data.cameras || []);
+                return data;
+            } catch (error) {
+                console.error('Error fetching cameras:', error);
+                renderCameras([]);
+                return null;
+            }
+        }
+
+        function updateConnectionStatus(online) {
+            const el = document.getElementById('connection-status');
+            const text = document.getElementById('connection-text');
+
+            if (online) {
+                el.className = 'connection-status online';
+                text.textContent = 'Conectado';
+            } else {
+                el.className = 'connection-status offline';
+                text.textContent = 'Desconectado';
+            }
+        }
+
+        function formatUptime(seconds) {
+            if (!seconds) return '--';
+
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+
+            if (days > 0) {
+                return `${days}d ${hours}h`;
+            } else if (hours > 0) {
+                return `${hours}h ${minutes}m`;
+            } else {
+                return `${minutes}m`;
+            }
+        }
+
+        function renderCameras(cameras) {
+            const container = document.getElementById('cameras-container');
+
+            if (cameras.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="icon">📷</div>
+                        <p>Nenhuma camera detectada</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="cameras-list">
+                    ${cameras.map(cam => `
+                        <div class="camera-item">
+                            <div class="camera-info">
+                                <div class="camera-icon">📹</div>
+                                <div class="camera-details">
+                                    <h3>${cam.name || cam.id}</h3>
+                                    <div class="path">${cam.path || '--'}</div>
+                                </div>
+                            </div>
+                            <span class="camera-status ${cam.status || 'available'}">${cam.status || 'disponivel'}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        async function refreshData() {
+            await Promise.all([
+                fetchStatus(),
+                fetchSystem(),
+                fetchCameras()
+            ]);
+        }
+
+        async function restartDevice() {
+            if (!confirm('Tem certeza que deseja reiniciar o device?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/restart', { method: 'POST' });
+                const data = await response.json();
+                alert('Comando de restart enviado!');
+            } catch (error) {
+                console.error('Error restarting:', error);
+                alert('Erro ao reiniciar device');
+            }
+        }
+
+        // Initial load
+        refreshData();
+
+        // Auto-refresh every 5 seconds
+        refreshInterval = setInterval(refreshData, 5000);
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+        });
+    </script>
+</body>
+</html>

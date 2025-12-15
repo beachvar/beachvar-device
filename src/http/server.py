@@ -5,9 +5,14 @@ Provides REST API for device management and monitoring.
 
 import asyncio
 import logging
+import os
+from pathlib import Path
 from aiohttp import web
 
 logger = logging.getLogger(__name__)
+
+# Static files directory
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 class DeviceHTTPServer:
@@ -18,16 +23,22 @@ class DeviceHTTPServer:
         self.port = port
         self.app = web.Application()
         self.runner: web.AppRunner | None = None
+        self.device_id = os.getenv("DEVICE_ID", "unknown")
         self._setup_routes()
 
     def _setup_routes(self) -> None:
         """Setup HTTP routes."""
-        self.app.router.add_get("/", self.handle_root)
+        # API routes
         self.app.router.add_get("/health", self.handle_health)
         self.app.router.add_get("/api/status", self.handle_status)
         self.app.router.add_get("/api/cameras", self.handle_cameras)
         self.app.router.add_get("/api/system", self.handle_system)
         self.app.router.add_post("/api/restart", self.handle_restart)
+
+        # Static files (frontend)
+        self.app.router.add_get("/", self.handle_index)
+        if STATIC_DIR.exists():
+            self.app.router.add_static("/static/", path=STATIC_DIR, name="static")
 
     async def start(self) -> None:
         """Start the HTTP server."""
@@ -47,11 +58,16 @@ class DeviceHTTPServer:
 
     # Route handlers
 
-    async def handle_root(self, request: web.Request) -> web.Response:
-        """Root endpoint - device info."""
+    async def handle_index(self, request: web.Request) -> web.Response:
+        """Serve the frontend HTML."""
+        index_file = STATIC_DIR / "index.html"
+        if index_file.exists():
+            return web.FileResponse(index_file)
+        # Fallback to JSON if no frontend
         return web.json_response({
             "name": "BeachVar Device",
             "version": "1.0.0",
+            "device_id": self.device_id,
             "endpoints": [
                 "/health",
                 "/api/status",
@@ -67,20 +83,20 @@ class DeviceHTTPServer:
 
     async def handle_status(self, request: web.Request) -> web.Response:
         """Device status endpoint."""
-        import os
         import psutil
+        import time
 
         # Get system info
         cpu_percent = psutil.cpu_percent(interval=0.1)
         memory = psutil.virtual_memory()
         disk = psutil.disk_usage("/")
 
-        # Get uptime
-        with open("/proc/uptime", "r") as f:
-            uptime_seconds = float(f.readline().split()[0])
+        # Get uptime (cross-platform)
+        uptime_seconds = time.time() - psutil.boot_time()
 
         return web.json_response({
             "status": "online",
+            "device_id": self.device_id,
             "uptime_seconds": int(uptime_seconds),
             "cpu_percent": cpu_percent,
             "memory": {
@@ -132,7 +148,8 @@ class DeviceHTTPServer:
     async def handle_system(self, request: web.Request) -> web.Response:
         """System information endpoint."""
         import platform
-        import os
+        import time
+        import psutil
 
         # Get temperature (Raspberry Pi)
         temperature = None
@@ -140,17 +157,32 @@ class DeviceHTTPServer:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 temperature = int(f.read()) / 1000.0
         except Exception:
-            pass
+            # Try psutil for other platforms
+            try:
+                temps = psutil.sensors_temperatures()
+                if temps:
+                    for name, entries in temps.items():
+                        if entries:
+                            temperature = entries[0].current
+                            break
+            except Exception:
+                pass
+
+        # Get CPU and memory
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        uptime_seconds = time.time() - psutil.boot_time()
 
         return web.json_response({
             "hostname": platform.node(),
             "platform": platform.platform(),
             "architecture": platform.machine(),
             "python_version": platform.python_version(),
-            "temperature_celsius": temperature,
-            "environment": {
-                "DEVICE_ID": os.getenv("DEVICE_ID", "unknown"),
-            },
+            "device_id": self.device_id,
+            "temperature": temperature,
+            "cpu_percent": cpu_percent,
+            "memory_percent": memory.percent,
+            "uptime_seconds": int(uptime_seconds),
         })
 
     async def handle_restart(self, request: web.Request) -> web.Response:
