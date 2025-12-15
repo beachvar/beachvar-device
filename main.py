@@ -111,7 +111,8 @@ async def main():
     logger.info(f"Device ID: {device_id}")
 
     # Start HTTP server (for tunnel access)
-    http_server = DeviceHTTPServer(host="127.0.0.1", port=http_port)
+    # Use 0.0.0.0 to allow access from cloudflared and within Docker
+    http_server = DeviceHTTPServer(host="0.0.0.0", port=http_port)
     await http_server.start()
 
     # Initialize tunnel manager
