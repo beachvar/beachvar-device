@@ -5,14 +5,12 @@ Handles communication with backend API and FFmpeg processes.
 
 import asyncio
 import logging
-import os
 import re
-import signal
 import subprocess
 import time
 from dataclasses import dataclass, field
 from typing import Optional, Callable
-from urllib.parse import quote, urlparse, urlunparse
+from urllib.parse import quote
 
 import aiohttp
 
@@ -328,19 +326,22 @@ class StreamManager:
         # Notify backend that stream is stopping
         await self._update_stream_status(camera_id, "stopping")
 
-        # Stop FFmpeg process gracefully
+        # Stop FFmpeg process gracefully (same pattern as stream.py)
         try:
             if stream.is_running:
-                # Send SIGINT for graceful shutdown
-                stream.process.send_signal(signal.SIGINT)
+                # Use terminate() first (SIGTERM) - cleaner than SIGINT
+                stream.process.terminate()
 
-                # Wait up to 5 seconds for graceful shutdown
+                # Wait up to 3 seconds for graceful shutdown
                 try:
-                    stream.process.wait(timeout=5)
+                    stream.process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     # Force kill if not responding
-                    stream.process.kill()
-                    stream.process.wait()
+                    try:
+                        stream.process.kill()
+                        stream.process.wait()
+                    except Exception:
+                        pass
 
             logger.info(f"Stopped stream for camera {camera_id}")
 
@@ -443,9 +444,9 @@ class StreamManager:
         cmd = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "warning",
+            "-loglevel", "error",  # Use error level to reduce stderr buffering
 
-            # Input options - optimized for RTSP
+            # Input options - optimized for RTSP (same as stable stream.py)
             "-rtsp_transport", "tcp",  # Use TCP for RTSP (more reliable)
             "-fflags", "+genpts+discardcorrupt",  # Generate PTS, discard corrupt frames
             "-flags", "low_delay",  # Low delay mode
@@ -475,11 +476,11 @@ class StreamManager:
         logger.debug(f"FFmpeg command: {' '.join(cmd)}")
 
         # Start FFmpeg as subprocess with stderr captured
+        # Note: Not passing stdin (like stream.py) - only stdout and stderr
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
         )
 
         return process
@@ -549,15 +550,14 @@ class StreamManager:
         """Monitor active streams and handle failures with auto-restart."""
         # Track retry counts for each camera
         retry_counts: dict[str, int] = {}
-        max_retries = 5
-        base_delay = 5  # seconds
+        max_retries = 10  # More retries before giving up
         health_check_interval = 30  # Full health check every 30 seconds
         stable_stream_threshold = 120  # Reset retries after 2 minutes of stable stream
         last_health_check = 0
 
         while self._running:
             try:
-                await asyncio.sleep(5)  # Check every 5 seconds for faster detection
+                await asyncio.sleep(1)  # Check every 1 second like stream.py for fast detection
 
                 # Monitor existing streams for failures
                 for camera_id, stream in list(self._streams.items()):
@@ -598,11 +598,12 @@ class StreamManager:
                         if self.on_stream_status_change:
                             self.on_stream_status_change(camera_id, "error")
 
-                        # Auto-restart with exponential backoff
+                        # Auto-restart with progressive backoff (like stream.py)
+                        # Backoff: 3s, 5s, 7s, 9s... max 30s
                         retry_count = retry_counts.get(camera_id, 0)
                         if retry_count < max_retries:
                             retry_counts[camera_id] = retry_count + 1
-                            delay = base_delay * (2 ** min(retry_count, 3))  # Cap at 40s max delay
+                            delay = min(3 + (retry_count * 2), 30)  # Progressive backoff, max 30s
                             logger.info(
                                 f"Will restart stream for {camera_name} in {delay}s "
                                 f"(attempt {retry_count + 1}/{max_retries})"
