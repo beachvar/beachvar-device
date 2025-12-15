@@ -120,7 +120,7 @@ class StreamManager:
         """Fetch cameras from backend and update cache."""
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/api/device/cameras/"
+                url = f"{self.backend_url}/api/v1/device/cameras/"
                 async with session.get(url, headers=self._get_headers()) as resp:
                     if resp.status == 200:
                         data = await resp.json()
@@ -157,7 +157,7 @@ class StreamManager:
         """
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/api/device/cameras/create/"
+                url = f"{self.backend_url}/api/v1/device/cameras/create/"
                 payload = {
                     "name": name,
                     "rtsp_url": rtsp_url,
@@ -188,7 +188,7 @@ class StreamManager:
         """Get camera details from backend."""
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/api/device/cameras/{camera_id}/"
+                url = f"{self.backend_url}/api/v1/device/cameras/{camera_id}/"
                 async with session.get(url, headers=self._get_headers()) as resp:
                     if resp.status == 200:
                         data = await resp.json()
@@ -210,7 +210,7 @@ class StreamManager:
 
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/api/device/cameras/{camera_id}/"
+                url = f"{self.backend_url}/api/v1/device/cameras/{camera_id}/"
                 async with session.delete(url, headers=self._get_headers()) as resp:
                     if resp.status == 204:
                         self._cameras.pop(camera_id, None)
@@ -340,7 +340,7 @@ class StreamManager:
         """Get current stream status from backend."""
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/api/device/cameras/{camera_id}/stream/status/"
+                url = f"{self.backend_url}/api/v1/device/cameras/{camera_id}/stream/status/"
                 async with session.get(url, headers=self._get_headers()) as resp:
                     if resp.status == 200:
                         data = await resp.json()
@@ -355,7 +355,7 @@ class StreamManager:
         """Get all active streams from backend."""
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/api/device/streams/"
+                url = f"{self.backend_url}/api/v1/device/streams/"
                 async with session.get(url, headers=self._get_headers()) as resp:
                     if resp.status == 200:
                         data = await resp.json()
@@ -431,7 +431,7 @@ class StreamManager:
         """Notify backend that stream is starting."""
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/api/device/cameras/{camera_id}/stream/start/"
+                url = f"{self.backend_url}/api/v1/device/cameras/{camera_id}/stream/start/"
                 async with session.post(url, headers=self._get_headers()) as resp:
                     if resp.status in (200, 201):
                         data = await resp.json()
@@ -448,7 +448,7 @@ class StreamManager:
         """Notify backend that stream has stopped."""
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/api/device/cameras/{camera_id}/stream/stop/"
+                url = f"{self.backend_url}/api/v1/device/cameras/{camera_id}/stream/stop/"
                 async with session.post(url, headers=self._get_headers()) as resp:
                     return resp.status in (200, 204)
         except Exception as e:
@@ -465,7 +465,7 @@ class StreamManager:
         """Update stream status on backend."""
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/api/device/cameras/{camera_id}/stream/status/"
+                url = f"{self.backend_url}/api/v1/device/cameras/{camera_id}/stream/status/"
                 payload = {"status": status}
                 if error_message:
                     payload["error_message"] = error_message
