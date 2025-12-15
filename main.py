@@ -72,13 +72,38 @@ async def handle_restart_stream(params: dict) -> dict:
 
 
 async def handle_refresh_cameras(params: dict) -> dict:
-    """Refresh camera list and restart streams."""
+    """Refresh camera list and start streams for new cameras."""
     global stream_manager
     if not stream_manager:
         return {"error": "Stream manager not initialized"}
 
+    # Get current camera IDs before refresh
+    old_camera_ids = set(stream_manager.cameras.keys())
+
+    # Refresh camera list from backend
     cameras = await stream_manager.refresh_cameras()
-    return {"cameras": len(cameras)}
+
+    # Find new cameras
+    new_camera_ids = set(c.id for c in cameras) - old_camera_ids
+    started = 0
+
+    # Start streams for new cameras that have stream configured
+    for camera in cameras:
+        if camera.id in new_camera_ids and camera.has_stream:
+            logger.info(f"Starting stream for new camera: {camera.name} ({camera.id})")
+            try:
+                result = await stream_manager.start_stream(camera.id)
+                if result:
+                    started += 1
+                    logger.info(f"Stream started for {camera.name}")
+            except Exception as e:
+                logger.error(f"Error starting stream for {camera.name}: {e}")
+
+    return {
+        "cameras": len(cameras),
+        "new_cameras": len(new_camera_ids),
+        "streams_started": started,
+    }
 
 
 async def on_tunnel_config(config: dict) -> None:

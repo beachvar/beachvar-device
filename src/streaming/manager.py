@@ -345,7 +345,9 @@ class StreamManager:
                 async with session.get(url, headers=self._get_headers()) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        return LiveStreamInfo.from_dict(data)
+                        # Backend returns {"stream": {...}}
+                        stream_data = data.get("stream", data)
+                        return LiveStreamInfo.from_dict(stream_data)
                     else:
                         return None
         except Exception as e:
@@ -437,7 +439,9 @@ class StreamManager:
                 async with session.post(url, headers=self._get_headers()) as resp:
                     if resp.status in (200, 201):
                         data = await resp.json()
-                        return LiveStreamInfo.from_dict(data)
+                        # Backend returns {"stream": {...}, "config": {...}}
+                        stream_data = data.get("stream", data)
+                        return LiveStreamInfo.from_dict(stream_data)
                     else:
                         error = await resp.text()
                         logger.error(f"Failed to notify stream start: {resp.status} - {error}")
