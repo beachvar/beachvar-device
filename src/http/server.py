@@ -268,20 +268,12 @@ class DeviceHTTPServer:
         if not file_path.exists():
             return web.Response(status=404, text="File not found")
 
-        # Determine content type
-        if filename.endswith(".m3u8"):
-            content_type = "application/vnd.apple.mpegurl"
-        else:
-            content_type = "video/MP2T"
-
-        # Read file and return with CORS headers
+        # Use FileResponse for efficient streaming (sendfile syscall when available)
         # Note: signature validation only on playlist (m3u8), segments served freely
         # This is acceptable because segments are temporary and require playlist URL to discover
         try:
-            content = file_path.read_bytes()
-            return web.Response(
-                body=content,
-                content_type=content_type,
+            response = web.FileResponse(
+                file_path,
                 headers={
                     "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -289,6 +281,7 @@ class DeviceHTTPServer:
                     "Cache-Control": "no-cache, no-store, must-revalidate",
                 },
             )
+            return response
         except Exception as e:
             logger.error(f"Error reading HLS file {file_path}: {e}")
             return web.Response(status=500, text="Error reading file")
