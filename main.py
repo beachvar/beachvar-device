@@ -209,12 +209,19 @@ async def handle_camera_updated(params: dict) -> dict:
 
 async def on_tunnel_config(config: dict) -> None:
     """Handle tunnel configuration from gateway."""
-    global tunnel_manager
+    global tunnel_manager, stream_manager
 
     if tunnel_manager and config:
         logger.info("Received tunnel configuration from gateway")
         if tunnel_manager.configure(config):
             await tunnel_manager.start()
+
+            # Update stream manager with public URL for HLS signing
+            if stream_manager:
+                public_url = tunnel_manager.get_public_url()
+                if public_url:
+                    stream_manager.device_public_url = public_url
+                    logger.info(f"Stream manager updated with public URL: {public_url}")
 
 
 async def auto_start_streams() -> None:
@@ -315,6 +322,7 @@ async def main():
         host="0.0.0.0",
         port=http_port,
         stream_manager=stream_manager,
+        device_token=device_token,
     )
     await http_server.start()
 
