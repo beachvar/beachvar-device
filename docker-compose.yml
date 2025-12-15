@@ -6,3 +6,15 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    # Access to host devices (cameras, USB)
+    privileged: true
+    devices:
+      - /dev:/dev
+    volumes:
+      # Access to video devices
+      - /dev:/dev:ro
+      # For v4l2-ctl and lsusb
+      - /sys:/sys:ro
+      - /proc:/proc:ro
+    # Use host network for easier device access
+    # network_mode: host  # Uncomment if needed

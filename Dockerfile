@@ -5,6 +5,8 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    v4l-utils \
+    usbutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cloudflared (optional, for tunnel support)
