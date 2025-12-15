@@ -229,8 +229,12 @@ class DeviceHTTPServer:
         if ".." in camera_id or ".." in filename:
             return web.Response(status=400, text="Invalid path")
 
-        # Validate signature (required if device_token is set)
-        if self.device_token:
+        # Validate signature only for playlist files (m3u8), not segments (ts)
+        # Segments are referenced by the playlist without query params, so we can't require signatures
+        # The playlist URL is the entry point that needs protection
+        is_playlist = filename.endswith(".m3u8")
+
+        if self.device_token and is_playlist:
             expires_str = request.query.get("expires", "")
             signature = request.query.get("sig", "")
 
