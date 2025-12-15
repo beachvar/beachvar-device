@@ -298,6 +298,289 @@
         .refresh-btn:active {
             transform: scale(0.95);
         }
+
+        /* Modal styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: #1a1a2e;
+            border-radius: 16px;
+            max-width: 700px;
+            width: 100%;
+            max-height: 90vh;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-header h2 {
+            font-size: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.5);
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            color: #fff;
+        }
+
+        .modal-body {
+            padding: 24px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .scan-progress {
+            margin-bottom: 20px;
+        }
+
+        .progress-bar {
+            height: 4px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4facfe, #00f2fe);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .progress-bar-fill.indeterminate {
+            width: 30%;
+            animation: indeterminate 1.5s infinite linear;
+        }
+
+        @keyframes indeterminate {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(400%); }
+        }
+
+        .scan-status {
+            font-size: 0.9rem;
+            color: rgba(255,255,255,0.6);
+            margin-top: 8px;
+        }
+
+        .scan-log {
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: monospace;
+            font-size: 0.8rem;
+            max-height: 150px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+        }
+
+        .scan-log-entry {
+            color: rgba(255,255,255,0.6);
+            margin-bottom: 4px;
+        }
+
+        .scan-log-entry.success {
+            color: #2ed573;
+        }
+
+        .scan-log-entry.error {
+            color: #ff4757;
+        }
+
+        .camera-detail-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .camera-detail-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .camera-detail-icon {
+            width: 56px;
+            height: 56px;
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.75rem;
+        }
+
+        .camera-detail-title h3 {
+            font-size: 1.1rem;
+            margin-bottom: 4px;
+        }
+
+        .camera-detail-title .path {
+            font-size: 0.85rem;
+            color: rgba(255,255,255,0.5);
+            font-family: monospace;
+        }
+
+        .camera-specs {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .camera-spec {
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+
+        .camera-spec-label {
+            font-size: 0.7rem;
+            color: rgba(255,255,255,0.4);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .camera-spec-value {
+            font-size: 0.9rem;
+            word-break: break-all;
+        }
+
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .tag {
+            background: rgba(79, 172, 254, 0.2);
+            color: #4facfe;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-family: monospace;
+        }
+
+        .usb-devices {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .usb-devices h3 {
+            font-size: 0.9rem;
+            color: rgba(255,255,255,0.6);
+            margin-bottom: 12px;
+        }
+
+        .usb-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        .usb-icon {
+            font-size: 1.25rem;
+        }
+
+        .usb-info {
+            flex: 1;
+        }
+
+        .usb-name {
+            font-size: 0.9rem;
+            margin-bottom: 2px;
+        }
+
+        .usb-id {
+            font-size: 0.75rem;
+            color: rgba(255,255,255,0.4);
+            font-family: monospace;
+        }
+
+        .no-cameras {
+            text-align: center;
+            padding: 40px 20px;
+            color: rgba(255,255,255,0.5);
+        }
+
+        .no-cameras .icon {
+            font-size: 4rem;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .no-cameras p {
+            margin-bottom: 8px;
+        }
+
+        .btn-secondary {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255,255,255,0.15);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .card-header h2 {
+            margin-bottom: 0;
+        }
+
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 0.8rem;
+        }
     </style>
 </head>
 <body>
@@ -335,7 +618,12 @@
         </div>
 
         <div class="status-card">
-            <h2>Cameras</h2>
+            <div class="card-header">
+                <h2>Cameras</h2>
+                <button class="btn btn-primary btn-sm" onclick="openScanModal()">
+                    🔍 Varredura
+                </button>
+            </div>
             <div id="cameras-container">
                 <div class="loading">
                     <div class="spinner"></div>
@@ -358,6 +646,39 @@
         <footer>
             BeachVar Device v1.0 | <span id="device-id">--</span>
         </footer>
+    </div>
+
+    <!-- Camera Scan Modal -->
+    <div id="scan-modal" class="modal-overlay" onclick="closeScanModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>🔍 Varredura de Cameras</h2>
+                <button class="modal-close" onclick="closeScanModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="scan-progress" class="scan-progress" style="display: none;">
+                    <div class="progress-bar">
+                        <div id="progress-bar-fill" class="progress-bar-fill indeterminate"></div>
+                    </div>
+                    <div id="scan-status" class="scan-status">Iniciando varredura...</div>
+                </div>
+
+                <div id="scan-log-container" class="scan-log" style="display: none;">
+                </div>
+
+                <div id="scan-results">
+                    <div class="no-cameras">
+                        <div class="icon">📷</div>
+                        <p>Clique no botao abaixo para iniciar a varredura</p>
+                        <p style="font-size: 0.8rem; opacity: 0.7;">A varredura detecta cameras USB, V4L2 e outros dispositivos de video</p>
+                        <br>
+                        <button class="btn btn-primary" onclick="startCameraScan()">
+                            🔍 Iniciar Varredura
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <button class="refresh-btn" onclick="refreshData()" title="Atualizar">
@@ -497,6 +818,193 @@
             }
         }
 
+        // Camera Scan Modal Functions
+        function openScanModal() {
+            document.getElementById('scan-modal').classList.add('active');
+        }
+
+        function closeScanModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('scan-modal').classList.remove('active');
+        }
+
+        async function startCameraScan() {
+            const progressEl = document.getElementById('scan-progress');
+            const logContainer = document.getElementById('scan-log-container');
+            const resultsEl = document.getElementById('scan-results');
+            const statusEl = document.getElementById('scan-status');
+            const progressFill = document.getElementById('progress-bar-fill');
+
+            // Show progress
+            progressEl.style.display = 'block';
+            logContainer.style.display = 'block';
+            logContainer.innerHTML = '';
+            statusEl.textContent = 'Iniciando varredura...';
+            progressFill.classList.add('indeterminate');
+
+            // Show loading in results
+            resultsEl.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                </div>
+            `;
+
+            try {
+                const response = await fetch('/api/cameras/scan', { method: 'POST' });
+                const data = await response.json();
+
+                // Update progress
+                progressFill.classList.remove('indeterminate');
+                progressFill.style.width = '100%';
+                statusEl.textContent = `Varredura concluida - ${data.total_found} camera(s) encontrada(s)`;
+
+                // Show log
+                if (data.scan_log) {
+                    logContainer.innerHTML = data.scan_log.map(entry => {
+                        let className = 'scan-log-entry';
+                        if (entry.includes('Encontrada') || entry.includes('concluida')) {
+                            className += ' success';
+                        } else if (entry.includes('Erro') || entry.includes('nao')) {
+                            className += ' error';
+                        }
+                        return `<div class="${className}">${entry}</div>`;
+                    }).join('');
+                    logContainer.scrollTop = logContainer.scrollHeight;
+                }
+
+                // Show results
+                renderScanResults(data.cameras, data.usb_devices);
+
+                // Also update main cameras list
+                fetchCameras();
+
+            } catch (error) {
+                console.error('Error scanning cameras:', error);
+                progressFill.classList.remove('indeterminate');
+                progressFill.style.width = '100%';
+                progressFill.style.background = '#ff4757';
+                statusEl.textContent = 'Erro ao realizar varredura';
+                resultsEl.innerHTML = `
+                    <div class="no-cameras">
+                        <div class="icon">❌</div>
+                        <p>Erro ao realizar varredura</p>
+                        <p style="font-size: 0.8rem; opacity: 0.7;">${error.message}</p>
+                        <br>
+                        <button class="btn btn-primary" onclick="startCameraScan()">
+                            Tentar Novamente
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        function renderScanResults(cameras, usbDevices) {
+            const resultsEl = document.getElementById('scan-results');
+
+            if (!cameras || cameras.length === 0) {
+                resultsEl.innerHTML = `
+                    <div class="no-cameras">
+                        <div class="icon">📷</div>
+                        <p>Nenhuma camera detectada</p>
+                        <p style="font-size: 0.8rem; opacity: 0.7;">Conecte uma camera USB e tente novamente</p>
+                        <br>
+                        <button class="btn btn-secondary" onclick="startCameraScan()">
+                            🔄 Nova Varredura
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = cameras.map(cam => `
+                <div class="camera-detail-card">
+                    <div class="camera-detail-header">
+                        <div class="camera-detail-icon">📹</div>
+                        <div class="camera-detail-title">
+                            <h3>${cam.name || cam.id}</h3>
+                            <div class="path">${cam.path || '--'}</div>
+                        </div>
+                    </div>
+                    <div class="camera-specs">
+                        ${cam.driver ? `
+                        <div class="camera-spec">
+                            <div class="camera-spec-label">Driver</div>
+                            <div class="camera-spec-value">${cam.driver}</div>
+                        </div>
+                        ` : ''}
+                        ${cam.card ? `
+                        <div class="camera-spec">
+                            <div class="camera-spec-label">Card</div>
+                            <div class="camera-spec-value">${cam.card}</div>
+                        </div>
+                        ` : ''}
+                        ${cam.bus ? `
+                        <div class="camera-spec">
+                            <div class="camera-spec-label">Bus</div>
+                            <div class="camera-spec-value">${cam.bus}</div>
+                        </div>
+                        ` : ''}
+                        ${cam.type ? `
+                        <div class="camera-spec">
+                            <div class="camera-spec-label">Tipo</div>
+                            <div class="camera-spec-value">${cam.type}</div>
+                        </div>
+                        ` : ''}
+                        ${cam.formats && cam.formats.length > 0 ? `
+                        <div class="camera-spec" style="grid-column: span 2;">
+                            <div class="camera-spec-label">Formatos</div>
+                            <div class="camera-spec-value">
+                                <div class="tag-list">
+                                    ${cam.formats.map(f => `<span class="tag">${f}</span>`).join('')}
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                        ${cam.resolutions && cam.resolutions.length > 0 ? `
+                        <div class="camera-spec" style="grid-column: span 2;">
+                            <div class="camera-spec-label">Resolucoes</div>
+                            <div class="camera-spec-value">
+                                <div class="tag-list">
+                                    ${cam.resolutions.slice(0, 8).map(r => `<span class="tag">${r}</span>`).join('')}
+                                    ${cam.resolutions.length > 8 ? `<span class="tag">+${cam.resolutions.length - 8}</span>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('');
+
+            // Add USB devices section
+            if (usbDevices && usbDevices.length > 0) {
+                html += `
+                    <div class="usb-devices">
+                        <h3>🔌 Dispositivos USB Detectados</h3>
+                        ${usbDevices.map(usb => `
+                            <div class="usb-item">
+                                <div class="usb-icon">🎥</div>
+                                <div class="usb-info">
+                                    <div class="usb-name">${usb.name}</div>
+                                    <div class="usb-id">ID: ${usb.usb_id} | Bus ${usb.bus} Device ${usb.device}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            // Add rescan button
+            html += `
+                <div style="text-align: center; margin-top: 20px;">
+                    <button class="btn btn-secondary" onclick="startCameraScan()">
+                        🔄 Nova Varredura
+                    </button>
+                </div>
+            `;
+
+            resultsEl.innerHTML = html;
+        }
+
         // Initial load
         refreshData();
 
@@ -507,6 +1015,13 @@
         window.addEventListener('beforeunload', () => {
             if (refreshInterval) {
                 clearInterval(refreshInterval);
+            }
+        });
+
+        // Close modal on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeScanModal();
             }
         });
     </script>
