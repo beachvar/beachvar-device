@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
 BeachVar Device - Main entry point.
-Connects to the BeachVar Gateway via WebSocket.
+
+This device is responsible for:
+1. Maintaining continuous live streams from all registered cameras to Cloudflare Stream
+2. Auto-restarting streams if they fail
+3. Reporting status to the backend
+
+Future: Handle button triggers for recording
 """
 
 import asyncio
@@ -34,39 +40,45 @@ gateway_client: GatewayClient | None = None
 stream_manager: StreamManager | None = None
 
 
-# Command handlers
-async def handle_get_cameras(params: dict) -> list:
-    """Return available cameras on this device."""
-    # TODO: Implement actual camera detection
-    # For now, return mock data
-    logger.info("Getting cameras...")
-    return [
-        {'id': 'cam1', 'name': 'Camera 1', 'path': '/dev/video0', 'status': 'available'},
-    ]
+# Command handlers for gateway commands
+async def handle_get_status(params: dict) -> dict:
+    """Return device and stream status."""
+    global stream_manager
+    if not stream_manager:
+        return {"error": "Stream manager not initialized"}
+
+    return {
+        "cameras": len(stream_manager.cameras),
+        "active_streams": len(stream_manager.active_streams),
+        "streams": stream_manager.active_streams,
+    }
 
 
-async def handle_start_stream(params: dict) -> dict:
-    """Start streaming from a camera."""
+async def handle_restart_stream(params: dict) -> dict:
+    """Restart a specific stream."""
+    global stream_manager
     camera_id = params.get('camera_id')
-    rtmp_url = params.get('rtmp_url')
-    logger.info(f"Starting stream for camera {camera_id} to {rtmp_url}")
-    # TODO: Implement actual streaming with ffmpeg
-    return {'streaming': True, 'camera_id': camera_id}
+
+    if not stream_manager or not camera_id:
+        return {"error": "Invalid request"}
+
+    # Stop if running
+    if camera_id in stream_manager.active_streams:
+        await stream_manager.stop_stream(camera_id)
+
+    # Start again
+    result = await stream_manager.start_stream(camera_id)
+    return {"success": result is not None, "camera_id": camera_id}
 
 
-async def handle_stop_stream(params: dict) -> dict:
-    """Stop streaming from a camera."""
-    camera_id = params.get('camera_id')
-    logger.info(f"Stopping stream for camera {camera_id}")
-    # TODO: Implement actual stream stopping
-    return {'streaming': False, 'camera_id': camera_id}
+async def handle_refresh_cameras(params: dict) -> dict:
+    """Refresh camera list and restart streams."""
+    global stream_manager
+    if not stream_manager:
+        return {"error": "Stream manager not initialized"}
 
-
-async def handle_restart(params: dict) -> dict:
-    """Restart the device."""
-    logger.warning("Restart requested!")
-    # TODO: Implement actual restart
-    return {'restarting': True}
+    cameras = await stream_manager.refresh_cameras()
+    return {"cameras": len(cameras)}
 
 
 async def on_tunnel_config(config: dict) -> None:
@@ -186,10 +198,9 @@ async def main():
     )
 
     # Register command handlers
-    gateway_client.register_command_handler('get_cameras', handle_get_cameras)
-    gateway_client.register_command_handler('start_stream', handle_start_stream)
-    gateway_client.register_command_handler('stop_stream', handle_stop_stream)
-    gateway_client.register_command_handler('restart', handle_restart)
+    gateway_client.register_command_handler('get_status', handle_get_status)
+    gateway_client.register_command_handler('restart_stream', handle_restart_stream)
+    gateway_client.register_command_handler('refresh_cameras', handle_refresh_cameras)
 
     # Register tunnel config callback
     gateway_client.on_tunnel_config = on_tunnel_config

@@ -485,7 +485,12 @@ class StreamManager:
     # ==================== Monitoring ====================
 
     async def _monitor_streams(self) -> None:
-        """Monitor active streams and handle failures."""
+        """Monitor active streams and handle failures with auto-restart."""
+        # Track retry counts for each camera
+        retry_counts: dict[str, int] = {}
+        max_retries = 5
+        base_delay = 5  # seconds
+
         while self._running:
             try:
                 await asyncio.sleep(10)  # Check every 10 seconds
@@ -521,7 +526,51 @@ class StreamManager:
                         if self.on_stream_status_change:
                             self.on_stream_status_change(camera_id, "error")
 
+                        # Auto-restart with exponential backoff
+                        retry_count = retry_counts.get(camera_id, 0)
+                        if retry_count < max_retries:
+                            retry_counts[camera_id] = retry_count + 1
+                            delay = base_delay * (2 ** retry_count)
+                            logger.info(
+                                f"Will restart stream for {camera_id} in {delay}s "
+                                f"(attempt {retry_count + 1}/{max_retries})"
+                            )
+                            asyncio.create_task(
+                                self._delayed_restart(camera_id, delay)
+                            )
+                        else:
+                            logger.error(
+                                f"Max retries ({max_retries}) reached for camera {camera_id}, "
+                                "giving up auto-restart"
+                            )
+
+                # Reset retry counts for cameras that have been running for a while
+                for camera_id, stream in self._streams.items():
+                    if stream.is_running and camera_id in retry_counts:
+                        # If stream has been running for 60+ seconds, reset retry count
+                        del retry_counts[camera_id]
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error in stream monitor: {e}")
+
+    async def _delayed_restart(self, camera_id: str, delay: float) -> None:
+        """Restart a stream after a delay."""
+        await asyncio.sleep(delay)
+
+        if not self._running:
+            return
+
+        # Refresh camera config in case it changed
+        camera = await self.get_camera(camera_id)
+        if not camera or not camera.has_stream:
+            logger.warning(f"Camera {camera_id} no longer has stream configured, skipping restart")
+            return
+
+        logger.info(f"Auto-restarting stream for camera {camera_id}")
+        result = await self.start_stream(camera_id)
+        if result:
+            logger.info(f"Successfully restarted stream for camera {camera_id}")
+        else:
+            logger.error(f"Failed to restart stream for camera {camera_id}")
