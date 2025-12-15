@@ -388,41 +388,45 @@ class StreamManager:
         rtsp_url = camera.rtsp_url
         rtmps_url = camera.stream.rtmps_full_url
 
-        # FFmpeg command for RTSP to RTMPS transcoding
-        # Using copy codecs for low-latency when possible
+        # FFmpeg command for RTSP to RTMPS streaming
+        # Optimized for low CPU usage with codec copy when possible
         cmd = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "warning",
+            "-loglevel", "error",
 
-            # Input options
+            # Input options - optimized for RTSP
             "-rtsp_transport", "tcp",  # Use TCP for RTSP (more reliable)
+            "-fflags", "+genpts+discardcorrupt",  # Generate PTS, discard corrupt frames
+            "-flags", "low_delay",  # Low delay mode
+            "-use_wallclock_as_timestamps", "1",  # Use wall clock for timestamps
             "-i", rtsp_url,
 
+            # Map video and audio (audio optional - won't fail if not present)
+            "-map", "0:v:0",
+            "-map", "0:a:0?",
+
+            # Video: copy if already H.264, minimal CPU usage
+            "-c:v", "copy",
+            "-bsf:v", "h264_mp4toannexb",  # Required for FLV output
+
+            # Audio: transcode to AAC
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-ar", "44100",
+
             # Output options
-            "-c:v", "libx264",  # Re-encode video to H.264
-            "-preset", "veryfast",  # Fast encoding for low latency
-            "-tune", "zerolatency",  # Optimize for streaming
-            "-b:v", "2500k",  # Video bitrate
-            "-maxrate", "2500k",
-            "-bufsize", "5000k",
-            "-g", "60",  # Keyframe interval (2 seconds at 30fps)
-
-            "-c:a", "aac",  # AAC audio
-            "-b:a", "128k",  # Audio bitrate
-            "-ar", "44100",  # Audio sample rate
-
-            # RTMPS output
+            "-max_muxing_queue_size", "1024",
             "-f", "flv",
             rtmps_url,
         ]
 
-        logger.debug(f"Starting FFmpeg: {' '.join(cmd[:5])}... -> {rtmps_url[:50]}...")
+        logger.info(f"Starting FFmpeg for camera {camera.name}: {rtsp_url} -> RTMPS")
 
         # Start FFmpeg as subprocess
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
         )
