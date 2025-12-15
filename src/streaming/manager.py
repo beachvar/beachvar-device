@@ -29,11 +29,17 @@ class StreamProcess:
     process: subprocess.Popen
     live_stream_id: Optional[str] = None
     started_at: Optional[str] = None
+    started_timestamp: float = field(default_factory=time.time)
 
     @property
     def is_running(self) -> bool:
         """Check if process is still running."""
         return self.process.poll() is None
+
+    @property
+    def uptime_seconds(self) -> float:
+        """Get stream uptime in seconds."""
+        return time.time() - self.started_timestamp
 
 
 class StreamManager:
@@ -545,34 +551,40 @@ class StreamManager:
         retry_counts: dict[str, int] = {}
         max_retries = 5
         base_delay = 5  # seconds
-        health_check_interval = 60  # Full health check every 60 seconds
+        health_check_interval = 30  # Full health check every 30 seconds
+        stable_stream_threshold = 120  # Reset retries after 2 minutes of stable stream
         last_health_check = 0
 
         while self._running:
             try:
-                await asyncio.sleep(10)  # Check every 10 seconds
+                await asyncio.sleep(5)  # Check every 5 seconds for faster detection
 
                 # Monitor existing streams for failures
                 for camera_id, stream in list(self._streams.items()):
                     if not stream.is_running:
                         # Stream died unexpectedly
-                        logger.warning(f"Stream for camera {camera_id} died unexpectedly")
+                        camera = self._cameras.get(camera_id)
+                        camera_name = camera.name if camera else camera_id
+                        logger.warning(f"Stream for {camera_name} ({camera_id}) died after {stream.uptime_seconds:.0f}s")
 
                         # Get return code
                         returncode = stream.process.returncode
                         stderr = ""
                         try:
                             stderr_bytes = stream.process.stderr.read()
-                            stderr = stderr_bytes.decode("utf-8", errors="ignore")[-1000:]
+                            stderr = stderr_bytes.decode("utf-8", errors="ignore")[-500:]
                         except Exception:
                             pass
 
                         # Notify backend of error
                         error_msg = f"FFmpeg exited with code {returncode}"
                         if stderr:
-                            error_msg += f": {stderr}"
+                            # Clean up stderr for logging
+                            stderr_clean = stderr.strip().split('\n')[-1] if stderr.strip() else ""
+                            if stderr_clean:
+                                error_msg += f": {stderr_clean}"
 
-                        logger.error(f"FFmpeg error for camera {camera_id}: {error_msg}")
+                        logger.error(f"FFmpeg error for {camera_name}: {error_msg}")
 
                         await self._update_stream_status(
                             camera_id,
@@ -590,9 +602,9 @@ class StreamManager:
                         retry_count = retry_counts.get(camera_id, 0)
                         if retry_count < max_retries:
                             retry_counts[camera_id] = retry_count + 1
-                            delay = base_delay * (2 ** retry_count)
+                            delay = base_delay * (2 ** min(retry_count, 3))  # Cap at 40s max delay
                             logger.info(
-                                f"Will restart stream for {camera_id} in {delay}s "
+                                f"Will restart stream for {camera_name} in {delay}s "
                                 f"(attempt {retry_count + 1}/{max_retries})"
                             )
                             asyncio.create_task(
@@ -600,15 +612,20 @@ class StreamManager:
                             )
                         else:
                             logger.error(
-                                f"Max retries ({max_retries}) reached for camera {camera_id}, "
-                                "giving up auto-restart"
+                                f"Max retries ({max_retries}) reached for {camera_name}, "
+                                "will retry on next health check"
                             )
+                            # Reset retry count so health check can try again
+                            retry_counts[camera_id] = 0
 
-                # Reset retry counts for cameras that have been running for a while
-                for camera_id, stream in self._streams.items():
+                # Reset retry counts for cameras that have been running stably
+                for camera_id, stream in list(self._streams.items()):
                     if stream.is_running and camera_id in retry_counts:
-                        # If stream has been running for 60+ seconds, reset retry count
-                        del retry_counts[camera_id]
+                        if stream.uptime_seconds >= stable_stream_threshold:
+                            camera = self._cameras.get(camera_id)
+                            camera_name = camera.name if camera else camera_id
+                            logger.info(f"Stream for {camera_name} stable for {stream.uptime_seconds:.0f}s, resetting retry count")
+                            del retry_counts[camera_id]
 
                 # Periodic full health check - ensure all cameras with streams are active
                 current_time = time.time()
@@ -623,7 +640,8 @@ class StreamManager:
 
     async def _ensure_all_streams_active(self, retry_counts: dict[str, int]) -> None:
         """Ensure all cameras with stream config have active streams."""
-        logger.debug("Running periodic health check for all cameras")
+        # Count active streams before refresh
+        active_before = len([s for s in self._streams.values() if s.is_running])
 
         # Refresh camera list from backend
         try:
@@ -632,7 +650,16 @@ class StreamManager:
             logger.error(f"Failed to refresh cameras during health check: {e}")
             return
 
+        # Count cameras that should be streaming
+        cameras_with_stream = [c for c in self._cameras.values() if c.has_stream]
+        active_streams = [s for s in self._streams.values() if s.is_running]
+
+        logger.info(
+            f"Health check: {len(active_streams)}/{len(cameras_with_stream)} cameras streaming"
+        )
+
         # Check each camera
+        cameras_started = 0
         for camera_id, camera in self._cameras.items():
             if not camera.has_stream:
                 continue
@@ -641,17 +668,14 @@ class StreamManager:
             if camera_id in self._streams and self._streams[camera_id].is_running:
                 continue
 
-            # Check if we've exceeded max retries for this camera
-            if retry_counts.get(camera_id, 0) >= 5:
-                continue
-
             # Camera should be streaming but isn't - start it
-            logger.info(f"Health check: Camera {camera.name} ({camera_id}) should be streaming but isn't. Starting...")
+            logger.info(f"Health check: {camera.name} not streaming, starting...")
 
             try:
                 result = await self.start_stream(camera_id)
                 if result:
-                    logger.info(f"Health check: Successfully started stream for {camera.name}")
+                    logger.info(f"Health check: Started stream for {camera.name}")
+                    cameras_started += 1
                     # Reset retry count on successful start
                     retry_counts.pop(camera_id, None)
                 else:
@@ -660,6 +684,9 @@ class StreamManager:
             except Exception as e:
                 logger.error(f"Health check: Error starting stream for {camera.name}: {e}")
                 retry_counts[camera_id] = retry_counts.get(camera_id, 0) + 1
+
+        if cameras_started > 0:
+            logger.info(f"Health check: Started {cameras_started} stream(s)")
 
     async def _delayed_restart(self, camera_id: str, delay: float) -> None:
         """Restart a stream after a delay."""
