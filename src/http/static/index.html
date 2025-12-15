@@ -666,6 +666,20 @@
                 <div id="scan-log-container" class="scan-log" style="display: none;">
                 </div>
 
+                <div id="scan-config" class="scan-config">
+                    <label for="network-input" style="display: block; margin-bottom: 8px; font-size: 0.9rem; color: rgba(255,255,255,0.7);">
+                        Range de rede (ex: 192.168.68)
+                    </label>
+                    <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+                        <input type="text" id="network-input" placeholder="192.168.68"
+                               style="flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: #fff; font-family: monospace;">
+                        <span style="display: flex; align-items: center; color: rgba(255,255,255,0.5);">.0/24</span>
+                    </div>
+                    <p style="font-size: 0.8rem; opacity: 0.6; margin-bottom: 16px;">
+                        Deixe vazio para detectar automaticamente. Use se o IP detectado estiver incorreto (comum no Docker).
+                    </p>
+                </div>
+
                 <div id="scan-results">
                     <div class="no-cameras">
                         <div class="icon">🌐</div>
@@ -834,12 +848,18 @@
             const resultsEl = document.getElementById('scan-results');
             const statusEl = document.getElementById('scan-status');
             const progressFill = document.getElementById('progress-bar-fill');
+            const networkInput = document.getElementById('network-input');
+
+            // Get network from input
+            const networkPrefix = networkInput.value.trim();
 
             // Show progress
             progressEl.style.display = 'block';
             logContainer.style.display = 'block';
             logContainer.innerHTML = '';
-            statusEl.textContent = 'Iniciando varredura...';
+            statusEl.textContent = networkPrefix
+                ? `Varrendo rede ${networkPrefix}.0/24...`
+                : 'Iniciando varredura...';
             progressFill.classList.add('indeterminate');
 
             // Show loading in results
@@ -850,7 +870,13 @@
             `;
 
             try {
-                const response = await fetch('/api/cameras/scan', { method: 'POST' });
+                // Build URL with optional network parameter
+                let url = '/api/cameras/scan';
+                if (networkPrefix) {
+                    url += `?network=${encodeURIComponent(networkPrefix)}`;
+                }
+
+                const response = await fetch(url, { method: 'POST' });
                 const data = await response.json();
 
                 // Update progress

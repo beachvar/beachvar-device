@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from src.gateway import GatewayClient
 from src.tunnel import TunnelManager
 from src.http import DeviceHTTPServer
+from src.streaming import StreamManager
 
 # Load environment variables
 load_dotenv()
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 http_server: DeviceHTTPServer | None = None
 tunnel_manager: TunnelManager | None = None
 gateway_client: GatewayClient | None = None
+stream_manager: StreamManager | None = None
 
 
 # Command handlers
@@ -77,9 +79,45 @@ async def on_tunnel_config(config: dict) -> None:
             await tunnel_manager.start()
 
 
+async def auto_start_streams() -> None:
+    """Auto-start streams for all registered cameras."""
+    global stream_manager
+
+    if not stream_manager:
+        return
+
+    logger.info("Auto-starting streams for registered cameras...")
+
+    # Get all cameras from backend
+    cameras = await stream_manager.refresh_cameras()
+
+    if not cameras:
+        logger.info("No cameras registered, skipping auto-start")
+        return
+
+    # Start streams for cameras that have stream configured
+    started_count = 0
+    for camera in cameras:
+        if camera.has_stream:
+            logger.info(f"Starting stream for camera: {camera.name} ({camera.id})")
+            try:
+                result = await stream_manager.start_stream(camera.id)
+                if result:
+                    started_count += 1
+                    logger.info(f"Stream started for {camera.name}")
+                else:
+                    logger.warning(f"Failed to start stream for {camera.name}")
+            except Exception as e:
+                logger.error(f"Error starting stream for {camera.name}: {e}")
+        else:
+            logger.info(f"Camera {camera.name} has no stream configured, skipping")
+
+    logger.info(f"Auto-start complete: {started_count}/{len(cameras)} streams started")
+
+
 async def main():
     """Main entry point."""
-    global http_server, tunnel_manager, gateway_client
+    global http_server, tunnel_manager, gateway_client, stream_manager
 
     # Get configuration from environment
     gateway_url = os.getenv('GATEWAY_URL')
@@ -87,6 +125,7 @@ async def main():
     device_token = os.getenv('DEVICE_TOKEN')
     token_file = os.getenv('TOKEN_FILE')
     http_port = int(os.getenv('HTTP_PORT', '8080'))
+    backend_url = os.getenv('BACKEND_URL')
 
     # Validate configuration
     if not gateway_url:
@@ -106,14 +145,33 @@ async def main():
             logger.error("DEVICE_TOKEN not set and no token file found")
             return
 
+    if not backend_url:
+        logger.error("BACKEND_URL not set")
+        return
+
     logger.info("Starting BeachVar Device")
     logger.info(f"Gateway: {gateway_url}")
+    logger.info(f"Backend: {backend_url}")
     logger.info(f"Device ID: {device_id}")
+
+    # Initialize stream manager
+    stream_manager = StreamManager(
+        backend_url=backend_url,
+        device_token=device_token,
+    )
+    await stream_manager.start()
 
     # Start HTTP server (for tunnel access)
     # Use 0.0.0.0 to allow access from cloudflared and within Docker
-    http_server = DeviceHTTPServer(host="0.0.0.0", port=http_port)
+    http_server = DeviceHTTPServer(
+        host="0.0.0.0",
+        port=http_port,
+        stream_manager=stream_manager,
+    )
     await http_server.start()
+
+    # Auto-start streams for registered cameras
+    await auto_start_streams()
 
     # Initialize tunnel manager
     tunnel_manager = TunnelManager(local_port=http_port)
@@ -143,6 +201,8 @@ async def main():
         logger.info("Shutting down...")
     finally:
         # Cleanup
+        if stream_manager:
+            await stream_manager.stop()
         if tunnel_manager:
             await tunnel_manager.stop()
         if http_server:

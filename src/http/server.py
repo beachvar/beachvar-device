@@ -7,7 +7,11 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from typing import Optional
+
 from aiohttp import web
+
+from ..streaming import StreamManager
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +22,18 @@ STATIC_DIR = Path(__file__).parent / "static"
 class DeviceHTTPServer:
     """HTTP server for device remote management."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8080):
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8080,
+        stream_manager: Optional[StreamManager] = None,
+    ):
         self.host = host
         self.port = port
         self.app = web.Application()
         self.runner: web.AppRunner | None = None
         self.device_id = os.getenv("DEVICE_ID", "unknown")
+        self.stream_manager = stream_manager
         self._setup_routes()
 
     def _setup_routes(self) -> None:
@@ -35,6 +45,17 @@ class DeviceHTTPServer:
         self.app.router.add_post("/api/cameras/scan", self.handle_cameras_scan)
         self.app.router.add_get("/api/system", self.handle_system)
         self.app.router.add_post("/api/restart", self.handle_restart)
+
+        # Registered cameras management (from backend)
+        self.app.router.add_get("/api/registered-cameras", self.handle_registered_cameras)
+        self.app.router.add_post("/api/registered-cameras", self.handle_create_camera)
+        self.app.router.add_delete("/api/registered-cameras/{camera_id}", self.handle_delete_camera)
+
+        # Stream management
+        self.app.router.add_get("/api/streams", self.handle_streams_list)
+        self.app.router.add_post("/api/streams/{camera_id}/start", self.handle_stream_start)
+        self.app.router.add_post("/api/streams/{camera_id}/stop", self.handle_stream_stop)
+        self.app.router.add_get("/api/streams/{camera_id}/status", self.handle_stream_status)
 
         # Static files (frontend)
         self.app.router.add_get("/", self.handle_index)
@@ -159,10 +180,21 @@ class DeviceHTTPServer:
 
         scan_log.append("Iniciando varredura de cameras...")
 
-        # Get local network info
-        local_ip = self._get_local_ip()
-        network_prefix = ".".join(local_ip.split(".")[:3]) if local_ip else None
-        scan_log.append(f"IP local: {local_ip}")
+        # Get network prefix from:
+        # 1. Query parameter (?network=192.168.68)
+        # 2. Environment variable (SCAN_NETWORK)
+        # 3. Auto-detect from local IP
+        network_prefix = request.query.get("network")
+
+        if not network_prefix:
+            network_prefix = os.getenv("SCAN_NETWORK")
+
+        if not network_prefix:
+            local_ip = self._get_local_ip()
+            network_prefix = ".".join(local_ip.split(".")[:3]) if local_ip else None
+            scan_log.append(f"IP local detectado: {local_ip}")
+        else:
+            scan_log.append(f"Usando rede configurada: {network_prefix}")
 
         # Method 1: Network scan for IP cameras
         if network_prefix:
@@ -565,3 +597,240 @@ class DeviceHTTPServer:
             pass
 
         return None
+
+    # ==================== Registered Cameras Handlers ====================
+
+    async def handle_registered_cameras(self, request: web.Request) -> web.Response:
+        """List cameras registered with the backend."""
+        if not self.stream_manager:
+            return web.json_response(
+                {"error": "Stream manager not configured"},
+                status=503
+            )
+
+        # Refresh cameras from backend
+        cameras = await self.stream_manager.refresh_cameras()
+
+        return web.json_response({
+            "cameras": [
+                {
+                    "id": cam.id,
+                    "name": cam.name,
+                    "rtsp_url": cam.rtsp_url,
+                    "position": cam.position,
+                    "court_id": cam.court_id,
+                    "court_name": cam.court_name,
+                    "complex_id": cam.complex_id,
+                    "complex_name": cam.complex_name,
+                    "has_stream": cam.has_stream,
+                    "stream": {
+                        "live_input_id": cam.stream.live_input_id,
+                        "playback_hls": cam.stream.playback_hls,
+                        "playback_dash": cam.stream.playback_dash,
+                    } if cam.stream else None,
+                    "is_streaming": cam.id in self.stream_manager.active_streams,
+                }
+                for cam in cameras
+            ],
+            "total": len(cameras),
+        })
+
+    async def handle_create_camera(self, request: web.Request) -> web.Response:
+        """Create a new camera registration."""
+        if not self.stream_manager:
+            return web.json_response(
+                {"error": "Stream manager not configured"},
+                status=503
+            )
+
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response(
+                {"error": "Invalid JSON"},
+                status=400
+            )
+
+        # Validate required fields
+        required = ["name", "rtsp_url", "court_id"]
+        missing = [f for f in required if not data.get(f)]
+        if missing:
+            return web.json_response(
+                {"error": f"Missing required fields: {', '.join(missing)}"},
+                status=400
+            )
+
+        camera = await self.stream_manager.create_camera(
+            name=data["name"],
+            rtsp_url=data["rtsp_url"],
+            court_id=data["court_id"],
+            position=data.get("position", "other"),
+        )
+
+        if not camera:
+            return web.json_response(
+                {"error": "Failed to create camera"},
+                status=500
+            )
+
+        return web.json_response({
+            "id": camera.id,
+            "name": camera.name,
+            "rtsp_url": camera.rtsp_url,
+            "position": camera.position,
+            "court_id": camera.court_id,
+            "court_name": camera.court_name,
+            "complex_id": camera.complex_id,
+            "complex_name": camera.complex_name,
+            "has_stream": camera.has_stream,
+            "stream": {
+                "live_input_id": camera.stream.live_input_id,
+                "rtmps_url": camera.stream.rtmps_url,
+                "playback_hls": camera.stream.playback_hls,
+                "playback_dash": camera.stream.playback_dash,
+            } if camera.stream else None,
+        }, status=201)
+
+    async def handle_delete_camera(self, request: web.Request) -> web.Response:
+        """Delete a camera registration."""
+        if not self.stream_manager:
+            return web.json_response(
+                {"error": "Stream manager not configured"},
+                status=503
+            )
+
+        camera_id = request.match_info.get("camera_id")
+        if not camera_id:
+            return web.json_response(
+                {"error": "Camera ID required"},
+                status=400
+            )
+
+        success = await self.stream_manager.delete_camera(camera_id)
+        if not success:
+            return web.json_response(
+                {"error": "Failed to delete camera"},
+                status=500
+            )
+
+        return web.Response(status=204)
+
+    # ==================== Stream Management Handlers ====================
+
+    async def handle_streams_list(self, request: web.Request) -> web.Response:
+        """List all active streams."""
+        if not self.stream_manager:
+            return web.json_response(
+                {"error": "Stream manager not configured"},
+                status=503
+            )
+
+        streams = await self.stream_manager.get_all_streams()
+
+        return web.json_response({
+            "streams": [
+                {
+                    "id": s.id,
+                    "status": s.status,
+                    "started_at": s.started_at,
+                    "stopped_at": s.stopped_at,
+                    "duration_seconds": s.duration_seconds,
+                    "bitrate_kbps": s.bitrate_kbps,
+                    "viewers_count": s.viewers_count,
+                    "error_message": s.error_message,
+                    "is_active": s.is_active,
+                }
+                for s in streams
+            ],
+            "total": len(streams),
+            "active_count": sum(1 for s in streams if s.is_active),
+        })
+
+    async def handle_stream_start(self, request: web.Request) -> web.Response:
+        """Start streaming from a camera."""
+        if not self.stream_manager:
+            return web.json_response(
+                {"error": "Stream manager not configured"},
+                status=503
+            )
+
+        camera_id = request.match_info.get("camera_id")
+        if not camera_id:
+            return web.json_response(
+                {"error": "Camera ID required"},
+                status=400
+            )
+
+        stream_info = await self.stream_manager.start_stream(camera_id)
+        if not stream_info:
+            return web.json_response(
+                {"error": "Failed to start stream"},
+                status=500
+            )
+
+        return web.json_response({
+            "id": stream_info.id,
+            "status": stream_info.status,
+            "started_at": stream_info.started_at,
+            "message": "Stream started successfully",
+        })
+
+    async def handle_stream_stop(self, request: web.Request) -> web.Response:
+        """Stop streaming from a camera."""
+        if not self.stream_manager:
+            return web.json_response(
+                {"error": "Stream manager not configured"},
+                status=503
+            )
+
+        camera_id = request.match_info.get("camera_id")
+        if not camera_id:
+            return web.json_response(
+                {"error": "Camera ID required"},
+                status=400
+            )
+
+        success = await self.stream_manager.stop_stream(camera_id)
+        if not success:
+            return web.json_response(
+                {"error": "No active stream found or failed to stop"},
+                status=400
+            )
+
+        return web.json_response({
+            "message": "Stream stopped successfully",
+        })
+
+    async def handle_stream_status(self, request: web.Request) -> web.Response:
+        """Get stream status for a camera."""
+        if not self.stream_manager:
+            return web.json_response(
+                {"error": "Stream manager not configured"},
+                status=503
+            )
+
+        camera_id = request.match_info.get("camera_id")
+        if not camera_id:
+            return web.json_response(
+                {"error": "Camera ID required"},
+                status=400
+            )
+
+        stream_info = await self.stream_manager.get_stream_status(camera_id)
+        if not stream_info:
+            return web.json_response({
+                "status": "idle",
+                "message": "No active stream",
+            })
+
+        return web.json_response({
+            "id": stream_info.id,
+            "status": stream_info.status,
+            "started_at": stream_info.started_at,
+            "stopped_at": stream_info.stopped_at,
+            "duration_seconds": stream_info.duration_seconds,
+            "bitrate_kbps": stream_info.bitrate_kbps,
+            "viewers_count": stream_info.viewers_count,
+            "error_message": stream_info.error_message,
+            "is_active": stream_info.is_active,
+        })

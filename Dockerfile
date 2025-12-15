@@ -7,10 +7,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     v4l-utils \
     usbutils \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cloudflared (optional, for tunnel support)
-RUN curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+# Detect architecture and download appropriate binary
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then \
+        CLOUDFLARED_ARCH="linux-arm64"; \
+    elif [ "$ARCH" = "armhf" ] || [ "$ARCH" = "arm" ]; then \
+        CLOUDFLARED_ARCH="linux-arm"; \
+    else \
+        CLOUDFLARED_ARCH="linux-amd64"; \
+    fi && \
+    curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${CLOUDFLARED_ARCH}" \
     -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
 
 # Install uv for fast dependency management
