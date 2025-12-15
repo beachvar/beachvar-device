@@ -80,7 +80,7 @@ class StreamManager:
     def _get_headers(self) -> dict:
         """Get HTTP headers for API requests."""
         return {
-            "Authorization": f"Bearer {self.device_token}",
+            "X-Device-Token": self.device_token,
             "Content-Type": "application/json",
         }
 
