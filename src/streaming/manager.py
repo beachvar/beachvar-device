@@ -556,11 +556,11 @@ class StreamManager:
             "-b:a", "128k",
             "-ar", "44100",
 
-            # HLS output options
+            # HLS output options for live streaming
             "-f", "hls",
             "-hls_time", "2",            # 2-second segments
-            "-hls_list_size", "150",     # 5 min DVR (150 * 2s = 300s)
-            "-hls_flags", "delete_segments+append_list",  # Delete old segments
+            "-hls_list_size", "10",      # Keep only last 10 segments in playlist (20s window)
+            "-hls_flags", "delete_segments",  # Delete old segment files
             "-hls_segment_filename", os.path.join(hls_dir, "segment_%03d.ts"),
             output_path,
         ]
