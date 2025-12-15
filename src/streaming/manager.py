@@ -546,16 +546,22 @@ class StreamManager:
             "-map", "0:v:0",
             "-map", "0:a:0?",
 
-            # Video: re-encode to H.264 for proper HLS compatibility
+            # Video: re-encode to H.264 with good compression
+            # 'veryfast' preset: good balance between speed and compression
+            # CRF 23: good quality with reasonable file size
+            # tune=zerolatency: minimize latency for live streaming
             "-c:v", "libx264",
-            "-preset", "ultrafast",
+            "-preset", "veryfast",
             "-tune", "zerolatency",
+            "-crf", "23",
+            "-maxrate", "2500k",  # Cap bitrate at 2.5 Mbps
+            "-bufsize", "5000k",  # Buffer size for rate control
             "-g", "60",  # GOP size (keyframe every 60 frames = 2s at 30fps)
             "-force_key_frames", "expr:gte(t,n_forced*2)",  # Force keyframe every 2 seconds
 
             # Audio: transcode to AAC
             "-c:a", "aac",
-            "-b:a", "128k",
+            "-b:a", "96k",  # 96kbps is enough for speech/ambient
             "-ar", "44100",
 
             # HLS output options for live streaming
