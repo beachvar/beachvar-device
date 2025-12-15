@@ -131,10 +131,11 @@ class DeviceHTTPServer:
         # HLS streaming (public - protected by HMAC signature)
         self.app.router.add_get("/hls/{camera_id}/{filename}", self.handle_hls_file)
 
-        # Static files / frontend (protected by Zero Trust)
-        self.app.router.add_get("/", self.handle_index)
+        # Static files / frontend (protected by Zero Trust: /manager/*)
+        self.app.router.add_get("/manager/", self.handle_index)
+        self.app.router.add_get("/manager", self.handle_index)
         if STATIC_DIR.exists():
-            self.app.router.add_static("/static/", path=STATIC_DIR, name="static")
+            self.app.router.add_static("/manager/static/", path=STATIC_DIR, name="static")
 
     async def start(self) -> None:
         """Start the HTTP server."""
@@ -170,6 +171,7 @@ class DeviceHTTPServer:
                     "/hls/{camera_id}/{filename}?expires=...&sig=...",
                 ],
                 "manager": [
+                    "/manager/ (this page)",
                     "/manager/status",
                     "/manager/cameras",
                     "/manager/cameras/scan",
