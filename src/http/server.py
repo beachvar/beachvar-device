@@ -4,8 +4,11 @@ Provides REST API for device management and monitoring.
 """
 
 import asyncio
+import hashlib
+import hmac
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +21,12 @@ logger = logging.getLogger(__name__)
 # Static files directory
 STATIC_DIR = Path(__file__).parent / "static"
 
+# HLS output directory
+HLS_DIR = Path("/tmp/hls")
+
+# URL signature settings
+HLS_SIGNATURE_EXPIRY_HOURS = 12
+
 
 class DeviceHTTPServer:
     """HTTP server for device remote management."""
@@ -27,37 +36,102 @@ class DeviceHTTPServer:
         host: str = "127.0.0.1",
         port: int = 8080,
         stream_manager: Optional[StreamManager] = None,
+        device_token: Optional[str] = None,
     ):
         self.host = host
         self.port = port
         self.app = web.Application()
         self.runner: web.AppRunner | None = None
         self.device_id = os.getenv("DEVICE_ID", "unknown")
+        self.device_token = device_token or os.getenv("DEVICE_TOKEN", "")
         self.stream_manager = stream_manager
         self._setup_routes()
 
+    # ==================== URL Signing ====================
+
+    def _generate_signature(self, camera_id: str, expires: int) -> str:
+        """Generate HMAC signature for HLS URL."""
+        message = f"{camera_id}:{expires}"
+        signature = hmac.new(
+            self.device_token.encode(),
+            message.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        return signature
+
+    def _verify_signature(self, camera_id: str, expires: int, signature: str) -> bool:
+        """Verify HMAC signature for HLS URL."""
+        if not self.device_token:
+            # No token configured, allow all (for development)
+            logger.warning("No device_token configured, allowing unsigned HLS access")
+            return True
+
+        # Check expiration
+        if time.time() > expires:
+            logger.warning(f"HLS signature expired for camera {camera_id}")
+            return False
+
+        # Verify signature
+        expected = self._generate_signature(camera_id, expires)
+        if not hmac.compare_digest(signature, expected):
+            logger.warning(f"Invalid HLS signature for camera {camera_id}")
+            return False
+
+        return True
+
+    def generate_signed_hls_url(self, camera_id: str, base_url: str) -> dict:
+        """
+        Generate a signed HLS URL with expiration.
+
+        Args:
+            camera_id: Camera UUID
+            base_url: Base URL for the device (e.g., https://device.tunnel.com)
+
+        Returns:
+            Dict with signed URL and expiration info
+        """
+        expires = int(time.time()) + (HLS_SIGNATURE_EXPIRY_HOURS * 3600)
+        signature = self._generate_signature(camera_id, expires)
+
+        # Build signed URL
+        signed_url = f"{base_url}/hls/{camera_id}/playlist.m3u8?expires={expires}&sig={signature}"
+
+        return {
+            "url": signed_url,
+            "expires": expires,
+            "expires_in_hours": HLS_SIGNATURE_EXPIRY_HOURS,
+        }
+
     def _setup_routes(self) -> None:
         """Setup HTTP routes."""
-        # API routes
+        # Health check (public - for monitoring)
         self.app.router.add_get("/health", self.handle_health)
-        self.app.router.add_get("/api/status", self.handle_status)
-        self.app.router.add_get("/api/cameras", self.handle_cameras)
-        self.app.router.add_post("/api/cameras/scan", self.handle_cameras_scan)
-        self.app.router.add_get("/api/system", self.handle_system)
-        self.app.router.add_post("/api/restart", self.handle_restart)
 
-        # Registered cameras management (from backend)
-        self.app.router.add_get("/api/registered-cameras", self.handle_registered_cameras)
-        self.app.router.add_post("/api/registered-cameras", self.handle_create_camera)
-        self.app.router.add_delete("/api/registered-cameras/{camera_id}", self.handle_delete_camera)
+        # Manager routes (protected by Zero Trust: /manager/*)
+        self.app.router.add_get("/manager/status", self.handle_status)
+        self.app.router.add_get("/manager/cameras", self.handle_cameras)
+        self.app.router.add_post("/manager/cameras/scan", self.handle_cameras_scan)
+        self.app.router.add_get("/manager/system", self.handle_system)
+        self.app.router.add_post("/manager/restart", self.handle_restart)
 
-        # Stream management
-        self.app.router.add_get("/api/streams", self.handle_streams_list)
-        self.app.router.add_post("/api/streams/{camera_id}/start", self.handle_stream_start)
-        self.app.router.add_post("/api/streams/{camera_id}/stop", self.handle_stream_stop)
-        self.app.router.add_get("/api/streams/{camera_id}/status", self.handle_stream_status)
+        # Registered cameras management (protected by Zero Trust)
+        self.app.router.add_get("/manager/registered-cameras", self.handle_registered_cameras)
+        self.app.router.add_post("/manager/registered-cameras", self.handle_create_camera)
+        self.app.router.add_delete("/manager/registered-cameras/{camera_id}", self.handle_delete_camera)
 
-        # Static files (frontend)
+        # Stream management (protected by Zero Trust)
+        self.app.router.add_get("/manager/streams", self.handle_streams_list)
+        self.app.router.add_post("/manager/streams/{camera_id}/start", self.handle_stream_start)
+        self.app.router.add_post("/manager/streams/{camera_id}/stop", self.handle_stream_stop)
+        self.app.router.add_get("/manager/streams/{camera_id}/status", self.handle_stream_status)
+
+        # HLS URL signing (protected by Zero Trust, generates signed URLs)
+        self.app.router.add_get("/manager/hls/{camera_id}/sign", self.handle_hls_sign)
+
+        # HLS streaming (public - protected by HMAC signature)
+        self.app.router.add_get("/hls/{camera_id}/{filename}", self.handle_hls_file)
+
+        # Static files / frontend (protected by Zero Trust)
         self.app.router.add_get("/", self.handle_index)
         if STATIC_DIR.exists():
             self.app.router.add_static("/static/", path=STATIC_DIR, name="static")
@@ -90,18 +164,126 @@ class DeviceHTTPServer:
             "name": "BeachVar Device",
             "version": "1.0.0",
             "device_id": self.device_id,
-            "endpoints": [
-                "/health",
-                "/api/status",
-                "/api/cameras",
-                "/api/system",
-                "/api/restart",
-            ],
+            "endpoints": {
+                "public": [
+                    "/health",
+                    "/hls/{camera_id}/{filename}?expires=...&sig=...",
+                ],
+                "manager": [
+                    "/manager/status",
+                    "/manager/cameras",
+                    "/manager/cameras/scan",
+                    "/manager/system",
+                    "/manager/restart",
+                    "/manager/registered-cameras",
+                    "/manager/streams",
+                    "/manager/hls/{camera_id}/sign",
+                ],
+            },
         })
 
     async def handle_health(self, request: web.Request) -> web.Response:
         """Health check endpoint."""
         return web.json_response({"status": "ok"})
+
+    async def handle_hls_sign(self, request: web.Request) -> web.Response:
+        """
+        Generate a signed HLS URL for a camera.
+        This endpoint should be protected by Zero Trust.
+        GET /api/hls/{camera_id}/sign
+        """
+        camera_id = request.match_info.get("camera_id")
+        if not camera_id:
+            return web.json_response({"error": "Camera ID required"}, status=400)
+
+        # Get base URL from request or header
+        # Cloudflare sets CF-Connecting-IP and other headers
+        host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host", "")
+        scheme = request.headers.get("X-Forwarded-Proto", "https")
+        base_url = f"{scheme}://{host}"
+
+        # Generate signed URL
+        signed = self.generate_signed_hls_url(camera_id, base_url)
+
+        return web.json_response({
+            "camera_id": camera_id,
+            "signed_url": signed["url"],
+            "expires": signed["expires"],
+            "expires_in_hours": signed["expires_in_hours"],
+            "message": "Use this URL to access HLS stream. URL expires in 12 hours.",
+        })
+
+    async def handle_hls_file(self, request: web.Request) -> web.Response:
+        """Serve HLS files (m3u8 playlist and .ts segments) with CORS headers and signature validation."""
+        camera_id = request.match_info.get("camera_id")
+        filename = request.match_info.get("filename")
+
+        if not camera_id or not filename:
+            return web.Response(status=400, text="Missing camera_id or filename")
+
+        # Security: only allow m3u8 and ts files
+        if not (filename.endswith(".m3u8") or filename.endswith(".ts")):
+            return web.Response(status=400, text="Invalid file type")
+
+        # Security: prevent path traversal
+        if ".." in camera_id or ".." in filename:
+            return web.Response(status=400, text="Invalid path")
+
+        # Validate signature (required if device_token is set)
+        if self.device_token:
+            expires_str = request.query.get("expires", "")
+            signature = request.query.get("sig", "")
+
+            if not expires_str or not signature:
+                return web.Response(
+                    status=403,
+                    text="Missing signature. Use /manager/hls/{camera_id}/sign to get a signed URL.",
+                    headers={"Access-Control-Allow-Origin": "*"},
+                )
+
+            try:
+                expires = int(expires_str)
+            except ValueError:
+                return web.Response(
+                    status=403,
+                    text="Invalid expires parameter",
+                    headers={"Access-Control-Allow-Origin": "*"},
+                )
+
+            if not self._verify_signature(camera_id, expires, signature):
+                return web.Response(
+                    status=403,
+                    text="Invalid or expired signature",
+                    headers={"Access-Control-Allow-Origin": "*"},
+                )
+
+        file_path = HLS_DIR / camera_id / filename
+
+        if not file_path.exists():
+            return web.Response(status=404, text="File not found")
+
+        # Determine content type
+        if filename.endswith(".m3u8"):
+            content_type = "application/vnd.apple.mpegurl"
+        else:
+            content_type = "video/MP2T"
+
+        # Read file and return with CORS headers
+        try:
+            content = file_path.read_bytes()
+            return web.Response(
+                body=content,
+                content_type=content_type,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*",
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                },
+            )
+        except Exception as e:
+            logger.error(f"Error reading HLS file {file_path}: {e}")
+            return web.Response(status=500, text="Error reading file")
 
     async def handle_status(self, request: web.Request) -> web.Response:
         """Device status endpoint."""

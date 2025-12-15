@@ -224,7 +224,9 @@ async def auto_start_streams() -> None:
     if not stream_manager:
         return
 
+    logger.info("=" * 50)
     logger.info("Auto-starting streams for registered cameras...")
+    logger.info("=" * 50)
 
     # Get all cameras from backend
     cameras = await stream_manager.refresh_cameras()
@@ -233,24 +235,32 @@ async def auto_start_streams() -> None:
         logger.info("No cameras registered, skipping auto-start")
         return
 
+    # Filter cameras that have stream configured
+    cameras_with_stream = [c for c in cameras if c.has_stream]
+    logger.info(f"Found {len(cameras_with_stream)} cameras with stream config")
+
     # Start streams for cameras that have stream configured
     started_count = 0
-    for camera in cameras:
-        if camera.has_stream:
-            logger.info(f"Starting stream for camera: {camera.name} ({camera.id})")
-            try:
-                result = await stream_manager.start_stream(camera.id)
-                if result:
-                    started_count += 1
-                    logger.info(f"Stream started for {camera.name}")
-                else:
-                    logger.warning(f"Failed to start stream for {camera.name}")
-            except Exception as e:
-                logger.error(f"Error starting stream for {camera.name}: {e}")
-        else:
-            logger.info(f"Camera {camera.name} has no stream configured, skipping")
+    for i, camera in enumerate(cameras_with_stream):
+        logger.info(f"[{i + 1}/{len(cameras_with_stream)}] Starting stream for camera: {camera.name}")
+        try:
+            result = await stream_manager.start_stream(camera.id)
+            if result:
+                started_count += 1
+                logger.info(f"[{i + 1}/{len(cameras_with_stream)}] Stream started successfully for {camera.name}")
+            else:
+                logger.warning(f"[{i + 1}/{len(cameras_with_stream)}] Failed to start stream for {camera.name}")
 
-    logger.info(f"Auto-start complete: {started_count}/{len(cameras)} streams started")
+            # Small delay between starting cameras to avoid race conditions
+            if i < len(cameras_with_stream) - 1:
+                await asyncio.sleep(0.5)
+
+        except Exception as e:
+            logger.error(f"[{i + 1}/{len(cameras_with_stream)}] Error starting stream for {camera.name}: {e}")
+
+    logger.info("=" * 50)
+    logger.info(f"Auto-start complete: {started_count}/{len(cameras_with_stream)} streams started")
+    logger.info("=" * 50)
 
 
 async def main():

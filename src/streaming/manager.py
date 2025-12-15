@@ -14,9 +14,12 @@ from urllib.parse import quote
 
 import aiohttp
 
-from .camera import CameraConfig, StreamConfig, LiveStreamInfo
+from .camera import CameraConfig, StreamConfig, LiveStreamInfo, StreamMode
 
 logger = logging.getLogger(__name__)
+
+# HLS output directory for local streaming
+HLS_OUTPUT_DIR = "/tmp/hls"
 
 
 @dataclass
@@ -50,6 +53,7 @@ class StreamManager:
         self,
         backend_url: str,
         device_token: str,
+        device_public_url: Optional[str] = None,
         on_stream_status_change: Optional[Callable] = None,
     ):
         """
@@ -58,10 +62,12 @@ class StreamManager:
         Args:
             backend_url: Backend API URL (e.g., https://api.beachvar.com)
             device_token: Device authentication token
+            device_public_url: Public URL for this device (e.g., https://device-id.devices.beachvar.com)
             on_stream_status_change: Callback for stream status changes
         """
         self.backend_url = backend_url.rstrip("/")
         self.device_token = device_token
+        self.device_public_url = device_public_url.rstrip("/") if device_public_url else None
         self.on_stream_status_change = on_stream_status_change
 
         # Cached cameras
@@ -140,13 +146,17 @@ class StreamManager:
         try:
             async with aiohttp.ClientSession() as session:
                 url = f"{self.backend_url}/api/v1/device/cameras/"
+                logger.info(f"Fetching cameras from {url}")
                 async with session.get(url, headers=self._get_headers()) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         camera_list = data.get("cameras", [])
                         cameras = [CameraConfig.from_dict(c) for c in camera_list]
                         self._cameras = {c.id: c for c in cameras}
-                        logger.info(f"Loaded {len(cameras)} cameras from backend")
+                        logger.info(f"Loaded {len(cameras)} cameras from backend:")
+                        for cam in cameras:
+                            has_stream = "YES" if cam.has_stream else "NO"
+                            logger.info(f"  - {cam.name} (ID: {cam.id[:8]}...) stream={has_stream}")
                         return cameras
                     else:
                         error = await resp.text()
@@ -255,13 +265,18 @@ class StreamManager:
         Returns:
             LiveStreamInfo or None on error
         """
+        # Get camera config first for logging
+        camera = self._cameras.get(camera_id)
+        camera_name = camera.name if camera else camera_id
+
+        logger.info(f"=== Starting stream for {camera_name} ({camera_id}) ===")
+
         # Check if already streaming
         if camera_id in self._streams and self._streams[camera_id].is_running:
-            logger.warning(f"Camera {camera_id} is already streaming")
+            logger.warning(f"Camera {camera_name} is already streaming")
             return None
 
         # Get camera config
-        camera = self._cameras.get(camera_id)
         if not camera:
             camera = await self.get_camera(camera_id)
 
@@ -270,16 +285,20 @@ class StreamManager:
             return None
 
         if not camera.has_stream:
-            logger.error(f"Camera {camera_id} has no stream configured")
+            logger.error(f"Camera {camera.name} has no stream configured")
             return None
 
         # Notify backend that stream is starting
+        logger.info(f"Notifying backend that {camera.name} is starting...")
         live_stream_info = await self._notify_stream_start(camera_id)
         if not live_stream_info:
+            logger.error(f"Failed to notify backend for {camera.name}")
             return None
+        logger.info(f"Backend notified for {camera.name}, stream ID: {live_stream_info.id}")
 
         # Start FFmpeg process
         try:
+            logger.info(f"Starting FFmpeg for {camera.name}...")
             process = self._start_ffmpeg(camera)
 
             self._streams[camera_id] = StreamProcess(
@@ -289,14 +308,23 @@ class StreamManager:
                 started_at=live_stream_info.started_at,
             )
 
-            logger.info(f"Started stream for camera {camera_id} (PID: {process.pid})")
+            logger.info(f"FFmpeg started for {camera.name} (PID: {process.pid})")
 
-            # Update backend with FFmpeg PID
-            await self._update_stream_status(
+            # Small delay to ensure backend has processed the stream creation
+            await asyncio.sleep(0.3)
+
+            # Update backend with FFmpeg PID and status=live
+            logger.info(f"Updating status to 'live' for {camera.name}...")
+            status_updated = await self._update_stream_status(
                 camera_id,
                 "live",
                 ffmpeg_pid=process.pid,
             )
+
+            if status_updated:
+                logger.info(f"=== Stream LIVE for {camera.name} ===")
+            else:
+                logger.warning(f"=== Stream started but status update failed for {camera.name} ===")
 
             if self.on_stream_status_change:
                 self.on_stream_status_change(camera_id, "live")
@@ -304,7 +332,7 @@ class StreamManager:
             return live_stream_info
 
         except Exception as e:
-            logger.error(f"Failed to start FFmpeg for camera {camera_id}: {e}")
+            logger.error(f"Failed to start FFmpeg for {camera.name}: {e}")
             await self._update_stream_status(camera_id, "error", error_message=str(e))
             return None
 
@@ -350,6 +378,11 @@ class StreamManager:
 
         # Remove from active streams
         del self._streams[camera_id]
+
+        # Clean up HLS files if this was a local HLS stream
+        camera = self._cameras.get(camera_id)
+        if camera and camera.is_local_hls:
+            self.cleanup_hls_files(camera_id)
 
         # Notify backend that stream has stopped
         await self._notify_stream_stop(camera_id)
@@ -421,7 +454,7 @@ class StreamManager:
 
     def _start_ffmpeg(self, camera: CameraConfig) -> subprocess.Popen:
         """
-        Start FFmpeg process to stream from RTSP to RTMPS.
+        Start FFmpeg process to stream from RTSP to RTMPS or HLS.
 
         Args:
             camera: Camera configuration with stream details
@@ -429,28 +462,44 @@ class StreamManager:
         Returns:
             FFmpeg subprocess
         """
-        if not camera.stream:
-            raise ValueError("Camera has no stream configured")
-
         rtsp_url = self._encode_rtsp_url(camera.rtsp_url)
 
-        # Use RTMPS for Cloudflare Stream
-        output_url = camera.stream.rtmps_full_url
-        output_format = "flv"
-        protocol = "RTMPS"
+        # Determine output based on stream mode
+        if camera.is_local_hls:
+            cmd = self._build_hls_ffmpeg_cmd(camera, rtsp_url)
+            protocol = "HLS (local)"
+        else:
+            if not camera.stream:
+                raise ValueError("Camera has no Cloudflare stream configured")
+            cmd = self._build_rtmps_ffmpeg_cmd(camera, rtsp_url)
+            protocol = "RTMPS (Cloudflare)"
 
-        # FFmpeg command for RTSP streaming
-        # Using codec copy for minimal CPU usage
-        cmd = [
+        logger.info(f"Starting FFmpeg for camera {camera.name}: {rtsp_url} -> {protocol}")
+        logger.debug(f"FFmpeg command: {' '.join(cmd)}")
+
+        # Start FFmpeg as subprocess with stderr captured
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+
+        return process
+
+    def _build_rtmps_ffmpeg_cmd(self, camera: CameraConfig, rtsp_url: str) -> list[str]:
+        """Build FFmpeg command for RTMPS output (Cloudflare Stream)."""
+        output_url = camera.stream.rtmps_full_url
+
+        return [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "error",  # Use error level to reduce stderr buffering
+            "-loglevel", "error",
 
-            # Input options - optimized for RTSP (same as stable stream.py)
-            "-rtsp_transport", "tcp",  # Use TCP for RTSP (more reliable)
-            "-fflags", "+genpts+discardcorrupt",  # Generate PTS, discard corrupt frames
-            "-flags", "low_delay",  # Low delay mode
-            "-use_wallclock_as_timestamps", "1",  # Use wall clock for timestamps
+            # Input options - optimized for RTSP
+            "-rtsp_transport", "tcp",
+            "-fflags", "+genpts+discardcorrupt",
+            "-flags", "low_delay",
+            "-use_wallclock_as_timestamps", "1",
             "-i", rtsp_url,
 
             # Map video and audio
@@ -468,22 +517,97 @@ class StreamManager:
 
             # Output options
             "-max_muxing_queue_size", "1024",
-            "-f", output_format,
+            "-f", "flv",
             output_url,
         ]
 
-        logger.info(f"Starting FFmpeg for camera {camera.name}: {rtsp_url} -> {protocol}")
-        logger.debug(f"FFmpeg command: {' '.join(cmd)}")
+    def _build_hls_ffmpeg_cmd(self, camera: CameraConfig, rtsp_url: str) -> list[str]:
+        """Build FFmpeg command for local HLS output."""
+        import os
 
-        # Start FFmpeg as subprocess with stderr captured
-        # Note: Not passing stdin (like stream.py) - only stdout and stderr
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
+        # Create HLS directory for this camera
+        hls_dir = os.path.join(HLS_OUTPUT_DIR, camera.id)
+        os.makedirs(hls_dir, exist_ok=True)
 
-        return process
+        output_path = os.path.join(hls_dir, "playlist.m3u8")
+
+        return [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel", "error",
+
+            # Input options - optimized for RTSP
+            "-rtsp_transport", "tcp",
+            "-fflags", "+genpts+discardcorrupt",
+            "-flags", "low_delay",
+            "-use_wallclock_as_timestamps", "1",
+            "-i", rtsp_url,
+
+            # Map video and audio
+            "-map", "0:v:0",
+            "-map", "0:a:0?",
+
+            # Video: copy codec (H.264 passthrough)
+            "-c:v", "copy",
+            "-bsf:v", "h264_mp4toannexb",
+
+            # Audio: transcode to AAC
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-ar", "44100",
+
+            # HLS output options
+            "-f", "hls",
+            "-hls_time", "2",            # 2-second segments
+            "-hls_list_size", "150",     # 5 min DVR (150 * 2s = 300s)
+            "-hls_flags", "delete_segments+append_list",  # Delete old segments
+            "-hls_segment_filename", os.path.join(hls_dir, "segment_%03d.ts"),
+            output_path,
+        ]
+
+    def get_hls_url(self, camera_id: str, signed: bool = True) -> Optional[str]:
+        """
+        Get the public HLS URL for a camera.
+
+        Args:
+            camera_id: Camera UUID
+            signed: If True, include HMAC signature (12h expiry)
+
+        Returns:
+            HLS URL (signed or unsigned based on parameter)
+        """
+        if not self.device_public_url:
+            return None
+
+        base_url = f"{self.device_public_url}/hls/{camera_id}/playlist.m3u8"
+
+        if signed and self.device_token:
+            # Generate signed URL with 12h expiry
+            expires = int(time.time()) + (12 * 3600)
+            message = f"{camera_id}:{expires}"
+            import hashlib
+            import hmac as hmac_mod
+            signature = hmac_mod.new(
+                self.device_token.encode(),
+                message.encode(),
+                hashlib.sha256
+            ).hexdigest()
+            return f"{base_url}?expires={expires}&sig={signature}"
+
+        return base_url
+
+    def cleanup_hls_files(self, camera_id: str) -> None:
+        """Clean up HLS files for a camera."""
+        import os
+        import shutil
+
+        hls_dir = os.path.join(HLS_OUTPUT_DIR, camera_id)
+        if os.path.exists(hls_dir):
+            try:
+                shutil.rmtree(hls_dir)
+                logger.info(f"Cleaned up HLS files for camera {camera_id}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up HLS files for camera {camera_id}: {e}")
 
     # ==================== Backend Communication ====================
 
@@ -492,7 +616,20 @@ class StreamManager:
         try:
             async with aiohttp.ClientSession() as session:
                 url = f"{self.backend_url}/api/v1/device/cameras/{camera_id}/stream/start/"
-                async with session.post(url, headers=self._get_headers()) as resp:
+
+                # For local HLS, send the HLS URL to the backend
+                payload = {}
+                camera = self._cameras.get(camera_id)
+                if camera and camera.is_local_hls:
+                    hls_url = self.get_hls_url(camera_id)
+                    if hls_url:
+                        payload["local_hls_url"] = hls_url
+
+                async with session.post(
+                    url,
+                    headers=self._get_headers(),
+                    json=payload if payload else None
+                ) as resp:
                     if resp.status in (200, 201):
                         data = await resp.json()
                         # Backend returns {"stream": {...}, "config": {...}}
@@ -523,26 +660,45 @@ class StreamManager:
         status: str,
         error_message: Optional[str] = None,
         ffmpeg_pid: Optional[int] = None,
+        retries: int = 3,
     ) -> bool:
-        """Update stream status on backend."""
-        try:
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/api/v1/device/cameras/{camera_id}/stream/status/"
-                payload = {"status": status}
-                if error_message:
-                    payload["error_message"] = error_message
-                if ffmpeg_pid:
-                    payload["ffmpeg_pid"] = ffmpeg_pid
+        """Update stream status on backend with retry logic."""
+        camera = self._cameras.get(camera_id)
+        camera_name = camera.name if camera else camera_id
 
-                async with session.patch(
-                    url,
-                    headers=self._get_headers(),
-                    json=payload
-                ) as resp:
-                    return resp.status == 200
-        except Exception as e:
-            logger.error(f"Error updating stream status: {e}")
-            return False
+        for attempt in range(retries):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    url = f"{self.backend_url}/api/v1/device/cameras/{camera_id}/stream/status/"
+                    payload = {"status": status}
+                    if error_message:
+                        payload["error_message"] = error_message
+                    if ffmpeg_pid:
+                        payload["ffmpeg_pid"] = ffmpeg_pid
+
+                    async with session.patch(
+                        url,
+                        headers=self._get_headers(),
+                        json=payload
+                    ) as resp:
+                        if resp.status == 200:
+                            logger.info(f"Updated status for {camera_name} to {status}")
+                            return True
+                        else:
+                            error = await resp.text()
+                            logger.warning(
+                                f"Failed to update status for {camera_name} to {status}: "
+                                f"{resp.status} - {error} (attempt {attempt + 1}/{retries})"
+                            )
+                            if attempt < retries - 1:
+                                await asyncio.sleep(0.5 * (attempt + 1))  # Backoff
+            except Exception as e:
+                logger.error(f"Error updating stream status for {camera_name}: {e} (attempt {attempt + 1}/{retries})")
+                if attempt < retries - 1:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+
+        logger.error(f"Failed to update status for {camera_name} after {retries} attempts")
+        return False
 
     # ==================== Monitoring ====================
 
@@ -553,7 +709,9 @@ class StreamManager:
         max_retries = 10  # More retries before giving up
         health_check_interval = 30  # Full health check every 30 seconds
         stable_stream_threshold = 120  # Reset retries after 2 minutes of stable stream
+        url_refresh_interval = 6 * 3600  # Refresh HLS URLs every 6 hours (half of 12h expiry)
         last_health_check = 0
+        last_url_refresh: dict[str, float] = {}  # Track last URL refresh per camera
 
         while self._running:
             try:
@@ -634,6 +792,22 @@ class StreamManager:
                     last_health_check = current_time
                     await self._ensure_all_streams_active(retry_counts)
 
+                # Refresh HLS URLs for local streams before they expire
+                for camera_id, stream in list(self._streams.items()):
+                    if not stream.is_running:
+                        continue
+
+                    camera = self._cameras.get(camera_id)
+                    if not camera or not camera.is_local_hls:
+                        continue
+
+                    # Check if URL needs refresh (every 6 hours)
+                    last_refresh = last_url_refresh.get(camera_id, stream.started_timestamp)
+                    if current_time - last_refresh >= url_refresh_interval:
+                        logger.info(f"Refreshing HLS URL for {camera.name} (URL expiring soon)")
+                        await self._refresh_hls_url(camera_id)
+                        last_url_refresh[camera_id] = current_time
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -688,6 +862,37 @@ class StreamManager:
 
         if cameras_started > 0:
             logger.info(f"Health check: Started {cameras_started} stream(s)")
+
+    async def _refresh_hls_url(self, camera_id: str) -> bool:
+        """Refresh the signed HLS URL on the backend (before it expires)."""
+        camera = self._cameras.get(camera_id)
+        camera_name = camera.name if camera else camera_id
+
+        try:
+            new_url = self.get_hls_url(camera_id)
+            if not new_url:
+                logger.warning(f"Could not generate new HLS URL for {camera_name}")
+                return False
+
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.backend_url}/api/v1/device/cameras/{camera_id}/stream/refresh-url/"
+                payload = {"local_hls_url": new_url}
+
+                async with session.post(
+                    url,
+                    headers=self._get_headers(),
+                    json=payload
+                ) as resp:
+                    if resp.status == 200:
+                        logger.info(f"Refreshed HLS URL for {camera_name}")
+                        return True
+                    else:
+                        error = await resp.text()
+                        logger.warning(f"Failed to refresh HLS URL for {camera_name}: {resp.status} - {error}")
+                        return False
+        except Exception as e:
+            logger.error(f"Error refreshing HLS URL for {camera_name}: {e}")
+            return False
 
     async def _delayed_restart(self, camera_id: str, delay: float) -> None:
         """Restart a stream after a delay."""

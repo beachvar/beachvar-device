@@ -3,7 +3,15 @@ Camera configuration and stream data models.
 """
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
+
+
+class StreamMode(str, Enum):
+    """Stream mode - how the camera streams video."""
+
+    CLOUDFLARE = "cloudflare"  # Stream to Cloudflare Stream (RTMPS)
+    LOCAL_HLS = "local_hls"    # Stream HLS locally (via tunnel)
 
 
 @dataclass
@@ -38,6 +46,7 @@ class CameraConfig:
     court_name: str
     complex_id: str
     complex_name: str
+    stream_mode: StreamMode = StreamMode.CLOUDFLARE
     stream: Optional[StreamConfig] = None
 
     @classmethod
@@ -59,6 +68,13 @@ class CameraConfig:
         court = data.get("court", {})
         complex_data = data.get("complex", {})
 
+        # Parse stream mode from backend
+        stream_mode_str = data.get("stream_mode", "cloudflare")
+        try:
+            stream_mode = StreamMode(stream_mode_str)
+        except ValueError:
+            stream_mode = StreamMode.CLOUDFLARE
+
         return cls(
             id=data["id"],
             name=data["name"],
@@ -68,13 +84,23 @@ class CameraConfig:
             court_name=court.get("name", ""),
             complex_id=complex_data.get("id", ""),
             complex_name=complex_data.get("name", ""),
+            stream_mode=stream_mode,
             stream=stream,
         )
 
     @property
     def has_stream(self) -> bool:
         """Check if camera has stream configured."""
-        return self.stream is not None
+        # For Cloudflare mode, need stream config
+        if self.stream_mode == StreamMode.CLOUDFLARE:
+            return self.stream is not None
+        # For local HLS mode, just need RTSP URL
+        return bool(self.rtsp_url)
+
+    @property
+    def is_local_hls(self) -> bool:
+        """Check if camera uses local HLS mode."""
+        return self.stream_mode == StreamMode.LOCAL_HLS
 
 
 @dataclass
