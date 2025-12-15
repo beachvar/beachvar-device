@@ -95,7 +95,7 @@ async def main():
         device_id=device_id,
         token=device_token,
         token_file=token_file,
-        heartbeat_interval=30,
+        heartbeat_interval=10,
     )
 
     # Register command handlers
