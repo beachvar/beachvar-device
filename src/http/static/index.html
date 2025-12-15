@@ -668,9 +668,9 @@
 
                 <div id="scan-results">
                     <div class="no-cameras">
-                        <div class="icon">📷</div>
+                        <div class="icon">🌐</div>
                         <p>Clique no botao abaixo para iniciar a varredura</p>
-                        <p style="font-size: 0.8rem; opacity: 0.7;">A varredura detecta cameras USB, V4L2 e outros dispositivos de video</p>
+                        <p style="font-size: 0.8rem; opacity: 0.7;">A varredura detecta cameras IP na rede local (RTSP, ONVIF, Dahua, XMEye) e dispositivos USB</p>
                         <br>
                         <button class="btn btn-primary" onclick="startCameraScan()">
                             🔍 Iniciar Varredura
@@ -919,13 +919,49 @@
             let html = cameras.map(cam => `
                 <div class="camera-detail-card">
                     <div class="camera-detail-header">
-                        <div class="camera-detail-icon">📹</div>
+                        <div class="camera-detail-icon">${cam.ip ? '🌐' : '📹'}</div>
                         <div class="camera-detail-title">
                             <h3>${cam.name || cam.id}</h3>
-                            <div class="path">${cam.path || '--'}</div>
+                            <div class="path">${cam.ip || cam.path || '--'}</div>
                         </div>
                     </div>
                     <div class="camera-specs">
+                        ${cam.type ? `
+                        <div class="camera-spec">
+                            <div class="camera-spec-label">Tipo</div>
+                            <div class="camera-spec-value">${cam.type}</div>
+                        </div>
+                        ` : ''}
+                        ${cam.ip ? `
+                        <div class="camera-spec">
+                            <div class="camera-spec-label">IP</div>
+                            <div class="camera-spec-value">${cam.ip}</div>
+                        </div>
+                        ` : ''}
+                        ${cam.rtsp_url ? `
+                        <div class="camera-spec" style="grid-column: span 2;">
+                            <div class="camera-spec-label">RTSP URL</div>
+                            <div class="camera-spec-value" style="font-family: monospace; font-size: 0.8rem;">${cam.rtsp_url}</div>
+                        </div>
+                        ` : ''}
+                        ${cam.web_url ? `
+                        <div class="camera-spec">
+                            <div class="camera-spec-label">Interface Web</div>
+                            <div class="camera-spec-value">
+                                <a href="${cam.web_url}" target="_blank" style="color: #4facfe;">${cam.web_url}</a>
+                            </div>
+                        </div>
+                        ` : ''}
+                        ${cam.ports && cam.ports.length > 0 ? `
+                        <div class="camera-spec">
+                            <div class="camera-spec-label">Portas Abertas</div>
+                            <div class="camera-spec-value">
+                                <div class="tag-list">
+                                    ${cam.ports.map(p => `<span class="tag">${p}</span>`).join('')}
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
                         ${cam.driver ? `
                         <div class="camera-spec">
                             <div class="camera-spec-label">Driver</div>
@@ -942,12 +978,6 @@
                         <div class="camera-spec">
                             <div class="camera-spec-label">Bus</div>
                             <div class="camera-spec-value">${cam.bus}</div>
-                        </div>
-                        ` : ''}
-                        ${cam.type ? `
-                        <div class="camera-spec">
-                            <div class="camera-spec-label">Tipo</div>
-                            <div class="camera-spec-value">${cam.type}</div>
                         </div>
                         ` : ''}
                         ${cam.formats && cam.formats.length > 0 ? `

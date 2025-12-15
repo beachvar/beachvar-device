@@ -147,17 +147,78 @@ class DeviceHTTPServer:
         return web.json_response({"cameras": cameras})
 
     async def handle_cameras_scan(self, request: web.Request) -> web.Response:
-        """Perform detailed camera scan."""
+        """Perform detailed camera scan (network + local)."""
         import subprocess
         import re
+        import socket
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
 
         cameras = []
         scan_log = []
 
         scan_log.append("Iniciando varredura de cameras...")
 
-        # Method 1: v4l2-ctl (Linux Video4Linux)
-        scan_log.append("Verificando dispositivos V4L2...")
+        # Get local network info
+        local_ip = self._get_local_ip()
+        network_prefix = ".".join(local_ip.split(".")[:3]) if local_ip else None
+        scan_log.append(f"IP local: {local_ip}")
+
+        # Method 1: Network scan for IP cameras
+        if network_prefix:
+            scan_log.append(f"Varrendo rede {network_prefix}.0/24...")
+
+            # Common camera ports
+            camera_ports = [
+                (554, "RTSP"),      # RTSP streaming
+                (80, "HTTP"),       # Web interface
+                (8080, "HTTP-Alt"), # Alt web interface
+                (443, "HTTPS"),     # Secure web
+                (8554, "RTSP-Alt"), # Alt RTSP
+                (37777, "Dahua"),   # Dahua cameras
+                (34567, "XMEye"),   # XMEye/Generic Chinese
+                (5000, "ONVIF"),    # ONVIF discovery
+            ]
+
+            # Scan network in parallel
+            discovered_hosts = await self._scan_network(network_prefix, camera_ports, scan_log)
+
+            for host_info in discovered_hosts:
+                ip = host_info["ip"]
+                open_ports = host_info["ports"]
+
+                # Determine camera type based on ports
+                cam_type = "IP Camera"
+                rtsp_url = None
+
+                if 554 in open_ports or 8554 in open_ports:
+                    rtsp_port = 554 if 554 in open_ports else 8554
+                    rtsp_url = f"rtsp://{ip}:{rtsp_port}/stream"
+                    cam_type = "RTSP Camera"
+                if 37777 in open_ports:
+                    cam_type = "Dahua Camera"
+                    rtsp_url = f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0"
+                if 34567 in open_ports:
+                    cam_type = "XMEye Camera"
+
+                # Try to get more info via HTTP
+                camera_name = await self._get_camera_name(ip, open_ports)
+
+                cam_info = {
+                    "id": f"ip-{ip.replace('.', '-')}",
+                    "name": camera_name or f"Camera {ip}",
+                    "ip": ip,
+                    "type": cam_type,
+                    "status": "available",
+                    "ports": open_ports,
+                    "rtsp_url": rtsp_url,
+                    "web_url": f"http://{ip}" if 80 in open_ports else None,
+                }
+                cameras.append(cam_info)
+                scan_log.append(f"Encontrada: {cam_info['name']} ({ip}) - {cam_type}")
+
+        # Method 2: v4l2-ctl (Linux Video4Linux) for local USB cameras
+        scan_log.append("Verificando dispositivos V4L2 locais...")
         try:
             result = subprocess.run(
                 ["v4l2-ctl", "--list-devices"],
@@ -397,3 +458,110 @@ class DeviceHTTPServer:
         await asyncio.sleep(5)
         import subprocess
         subprocess.run(["sudo", "reboot"])
+
+    def _get_local_ip(self) -> str | None:
+        """Get local IP address."""
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return None
+
+    async def _scan_network(
+        self,
+        network_prefix: str,
+        camera_ports: list[tuple[int, str]],
+        scan_log: list[str],
+    ) -> list[dict]:
+        """Scan network for IP cameras."""
+        import socket
+        import asyncio
+
+        discovered = []
+        port_numbers = [p[0] for p in camera_ports]
+
+        async def check_host(ip: str) -> dict | None:
+            """Check if host has any camera ports open."""
+            open_ports = []
+            for port in port_numbers:
+                try:
+                    reader, writer = await asyncio.wait_for(
+                        asyncio.open_connection(ip, port),
+                        timeout=0.5
+                    )
+                    writer.close()
+                    await writer.wait_closed()
+                    open_ports.append(port)
+                except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+                    pass
+
+            if open_ports:
+                return {"ip": ip, "ports": open_ports}
+            return None
+
+        # Scan all IPs in parallel (1-254)
+        tasks = [check_host(f"{network_prefix}.{i}") for i in range(1, 255)]
+
+        # Process in batches to avoid too many connections
+        batch_size = 50
+        for i in range(0, len(tasks), batch_size):
+            batch = tasks[i:i + batch_size]
+            results = await asyncio.gather(*batch, return_exceptions=True)
+            for result in results:
+                if result and isinstance(result, dict):
+                    discovered.append(result)
+
+        scan_log.append(f"Encontrados {len(discovered)} hosts com portas de camera")
+        return discovered
+
+    async def _get_camera_name(self, ip: str, open_ports: list[int]) -> str | None:
+        """Try to get camera name via HTTP."""
+        import aiohttp
+
+        if 80 not in open_ports and 8080 not in open_ports:
+            return None
+
+        port = 80 if 80 in open_ports else 8080
+
+        try:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=2)
+            ) as session:
+                # Try common endpoints
+                endpoints = [
+                    f"http://{ip}:{port}/",
+                    f"http://{ip}:{port}/cgi-bin/magicBox.cgi?action=getDeviceType",
+                ]
+                for url in endpoints:
+                    try:
+                        async with session.get(url) as resp:
+                            if resp.status == 200:
+                                text = await resp.text()
+                                # Try to extract name from response
+                                if "deviceType" in text:
+                                    # Dahua format
+                                    import re
+                                    match = re.search(r"deviceType=(.+)", text)
+                                    if match:
+                                        return match.group(1).strip()
+                                # Check title tag
+                                import re
+                                title_match = re.search(
+                                    r"<title>([^<]+)</title>",
+                                    text,
+                                    re.IGNORECASE
+                                )
+                                if title_match:
+                                    title = title_match.group(1).strip()
+                                    if title and len(title) < 50:
+                                        return title
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        return None
