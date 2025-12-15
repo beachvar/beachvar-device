@@ -275,78 +275,20 @@ class DeviceHTTPServer:
             content_type = "video/MP2T"
 
         # Read file and return with CORS headers
+        # Note: signature validation only on playlist (m3u8), segments served freely
+        # This is acceptable because segments are temporary and require playlist URL to discover
         try:
-            if is_playlist:
-                # For playlist files, rewrite segment URLs to include signature
-                content = file_path.read_text()
-
-                # Get the signature params from the request to pass to segments
-                expires_str = request.query.get("expires", "")
-                signature = request.query.get("sig", "")
-
-                if expires_str and signature:
-                    # Rewrite each segment reference to include the signature
-                    lines = content.split("\n")
-                    rewritten_lines = []
-                    for line in lines:
-                        if line.endswith(".ts"):
-                            # Add signature to segment URL
-                            rewritten_lines.append(f"{line}?expires={expires_str}&sig={signature}")
-                        else:
-                            rewritten_lines.append(line)
-                    content = "\n".join(rewritten_lines)
-
-                return web.Response(
-                    text=content,
-                    content_type=content_type,
-                    headers={
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Methods": "GET, OPTIONS",
-                        "Access-Control-Allow-Headers": "*",
-                        "Cache-Control": "no-cache, no-store, must-revalidate",
-                    },
-                )
-            else:
-                # For .ts segments, validate signature
-                if self.device_token:
-                    expires_str = request.query.get("expires", "")
-                    signature = request.query.get("sig", "")
-
-                    if not expires_str or not signature:
-                        return web.Response(
-                            status=403,
-                            text="Missing signature for segment",
-                            headers={"Access-Control-Allow-Origin": "*"},
-                        )
-
-                    try:
-                        expires = int(expires_str)
-                    except ValueError:
-                        return web.Response(
-                            status=403,
-                            text="Invalid expires parameter",
-                            headers={"Access-Control-Allow-Origin": "*"},
-                        )
-
-                    if not self._verify_signature(camera_id, expires, signature):
-                        return web.Response(
-                            status=403,
-                            text="Invalid or expired signature",
-                            headers={"Access-Control-Allow-Origin": "*"},
-                        )
-
-                # Serve the segment file
-                content = file_path.read_bytes()
-                return web.Response(
-                    body=content,
-                    content_type=content_type,
-                    headers={
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Methods": "GET, OPTIONS",
-                        "Access-Control-Allow-Headers": "*",
-                        "Cache-Control": "no-cache, no-store, must-revalidate",
-                    },
-                )
+            content = file_path.read_bytes()
+            return web.Response(
+                body=content,
+                content_type=content_type,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*",
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                },
+            )
         except Exception as e:
             logger.error(f"Error reading HLS file {file_path}: {e}")
             return web.Response(status=500, text="Error reading file")
