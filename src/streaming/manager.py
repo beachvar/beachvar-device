@@ -901,6 +901,11 @@ class StreamManager:
         if not self._running:
             return
 
+        # Check if stream is already running (may have been restarted by health check)
+        if camera_id in self._streams and self._streams[camera_id].is_running:
+            logger.debug(f"Stream for camera {camera_id} is already running, skipping delayed restart")
+            return
+
         # Refresh camera config in case it changed
         camera = await self.get_camera(camera_id)
         if not camera or not camera.has_stream:
