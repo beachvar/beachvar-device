@@ -7,11 +7,14 @@ Connects to the BeachVar Gateway via WebSocket.
 import asyncio
 import logging
 import os
+import signal
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from src.gateway import GatewayClient
+from src.tunnel import TunnelManager
+from src.http import DeviceHTTPServer
 
 # Load environment variables
 load_dotenv()
@@ -22,6 +25,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Global instances for signal handling
+http_server: DeviceHTTPServer | None = None
+tunnel_manager: TunnelManager | None = None
+gateway_client: GatewayClient | None = None
 
 
 # Command handlers
@@ -59,13 +67,26 @@ async def handle_restart(params: dict) -> dict:
     return {'restarting': True}
 
 
+async def on_tunnel_config(config: dict) -> None:
+    """Handle tunnel configuration from gateway."""
+    global tunnel_manager
+
+    if tunnel_manager and config:
+        logger.info("Received tunnel configuration from gateway")
+        if tunnel_manager.configure(config):
+            await tunnel_manager.start()
+
+
 async def main():
     """Main entry point."""
+    global http_server, tunnel_manager, gateway_client
+
     # Get configuration from environment
     gateway_url = os.getenv('GATEWAY_URL')
     device_id = os.getenv('DEVICE_ID')
     device_token = os.getenv('DEVICE_TOKEN')
     token_file = os.getenv('TOKEN_FILE')
+    http_port = int(os.getenv('HTTP_PORT', '8080'))
 
     # Validate configuration
     if not gateway_url:
@@ -85,12 +106,19 @@ async def main():
             logger.error("DEVICE_TOKEN not set and no token file found")
             return
 
-    logger.info(f"Starting BeachVar Device")
+    logger.info("Starting BeachVar Device")
     logger.info(f"Gateway: {gateway_url}")
     logger.info(f"Device ID: {device_id}")
 
-    # Create client
-    client = GatewayClient(
+    # Start HTTP server (for tunnel access)
+    http_server = DeviceHTTPServer(host="127.0.0.1", port=http_port)
+    await http_server.start()
+
+    # Initialize tunnel manager
+    tunnel_manager = TunnelManager(local_port=http_port)
+
+    # Create gateway client
+    gateway_client = GatewayClient(
         gateway_url=gateway_url,
         device_id=device_id,
         token=device_token,
@@ -99,18 +127,40 @@ async def main():
     )
 
     # Register command handlers
-    client.register_command_handler('get_cameras', handle_get_cameras)
-    client.register_command_handler('start_stream', handle_start_stream)
-    client.register_command_handler('stop_stream', handle_stop_stream)
-    client.register_command_handler('restart', handle_restart)
+    gateway_client.register_command_handler('get_cameras', handle_get_cameras)
+    gateway_client.register_command_handler('start_stream', handle_start_stream)
+    gateway_client.register_command_handler('stop_stream', handle_stop_stream)
+    gateway_client.register_command_handler('restart', handle_restart)
+
+    # Register tunnel config callback
+    gateway_client.on_tunnel_config = on_tunnel_config
 
     # Connect and run
     try:
-        await client.connect()
-    except KeyboardInterrupt:
+        await gateway_client.connect()
+    except asyncio.CancelledError:
         logger.info("Shutting down...")
-        await client.disconnect()
+    finally:
+        # Cleanup
+        if tunnel_manager:
+            await tunnel_manager.stop()
+        if http_server:
+            await http_server.stop()
+        if gateway_client:
+            await gateway_client.disconnect()
+
+
+def handle_signal(sig, frame):
+    """Handle shutdown signals."""
+    logger.info(f"Received signal {sig}, shutting down...")
+    # Cancel all tasks
+    for task in asyncio.all_tasks():
+        task.cancel()
 
 
 if __name__ == '__main__':
+    # Register signal handlers
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
     asyncio.run(main())
