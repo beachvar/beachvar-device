@@ -9,6 +9,7 @@ import os
 import re
 import signal
 import subprocess
+import time
 from dataclasses import dataclass, field
 from typing import Optional, Callable
 from urllib.parse import quote, urlparse, urlunparse
@@ -544,11 +545,14 @@ class StreamManager:
         retry_counts: dict[str, int] = {}
         max_retries = 5
         base_delay = 5  # seconds
+        health_check_interval = 60  # Full health check every 60 seconds
+        last_health_check = 0
 
         while self._running:
             try:
                 await asyncio.sleep(10)  # Check every 10 seconds
 
+                # Monitor existing streams for failures
                 for camera_id, stream in list(self._streams.items()):
                     if not stream.is_running:
                         # Stream died unexpectedly
@@ -606,10 +610,56 @@ class StreamManager:
                         # If stream has been running for 60+ seconds, reset retry count
                         del retry_counts[camera_id]
 
+                # Periodic full health check - ensure all cameras with streams are active
+                current_time = time.time()
+                if current_time - last_health_check >= health_check_interval:
+                    last_health_check = current_time
+                    await self._ensure_all_streams_active(retry_counts)
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error in stream monitor: {e}")
+
+    async def _ensure_all_streams_active(self, retry_counts: dict[str, int]) -> None:
+        """Ensure all cameras with stream config have active streams."""
+        logger.debug("Running periodic health check for all cameras")
+
+        # Refresh camera list from backend
+        try:
+            await self.refresh_cameras()
+        except Exception as e:
+            logger.error(f"Failed to refresh cameras during health check: {e}")
+            return
+
+        # Check each camera
+        for camera_id, camera in self._cameras.items():
+            if not camera.has_stream:
+                continue
+
+            # Check if stream is already active
+            if camera_id in self._streams and self._streams[camera_id].is_running:
+                continue
+
+            # Check if we've exceeded max retries for this camera
+            if retry_counts.get(camera_id, 0) >= 5:
+                continue
+
+            # Camera should be streaming but isn't - start it
+            logger.info(f"Health check: Camera {camera.name} ({camera_id}) should be streaming but isn't. Starting...")
+
+            try:
+                result = await self.start_stream(camera_id)
+                if result:
+                    logger.info(f"Health check: Successfully started stream for {camera.name}")
+                    # Reset retry count on successful start
+                    retry_counts.pop(camera_id, None)
+                else:
+                    logger.warning(f"Health check: Failed to start stream for {camera.name}")
+                    retry_counts[camera_id] = retry_counts.get(camera_id, 0) + 1
+            except Exception as e:
+                logger.error(f"Health check: Error starting stream for {camera.name}: {e}")
+                retry_counts[camera_id] = retry_counts.get(camera_id, 0) + 1
 
     async def _delayed_restart(self, camera_id: str, delay: float) -> None:
         """Restart a stream after a delay."""
