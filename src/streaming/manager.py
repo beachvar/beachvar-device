@@ -539,7 +539,6 @@ class StreamManager:
             # Input options - optimized for RTSP
             "-rtsp_transport", "tcp",
             "-fflags", "+genpts+discardcorrupt",
-            "-flags", "low_delay",
             "-use_wallclock_as_timestamps", "1",
             "-i", rtsp_url,
 
@@ -547,9 +546,12 @@ class StreamManager:
             "-map", "0:v:0",
             "-map", "0:a:0?",
 
-            # Video: copy codec (H.264 passthrough)
-            "-c:v", "copy",
-            "-bsf:v", "h264_mp4toannexb",
+            # Video: re-encode to H.264 for proper HLS compatibility
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-tune", "zerolatency",
+            "-g", "60",  # GOP size (keyframe every 60 frames = 2s at 30fps)
+            "-force_key_frames", "expr:gte(t,n_forced*2)",  # Force keyframe every 2 seconds
 
             # Audio: transcode to AAC
             "-c:a", "aac",
