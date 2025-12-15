@@ -106,6 +106,107 @@ async def handle_refresh_cameras(params: dict) -> dict:
     }
 
 
+async def handle_camera_created(params: dict) -> dict:
+    """Handle camera created event - fetch camera and start stream."""
+    global stream_manager
+    camera_id = params.get("camera_id")
+
+    if not stream_manager or not camera_id:
+        return {"error": "Invalid request"}
+
+    logger.info(f"Camera created event received: {camera_id}")
+
+    # Fetch the new camera from backend
+    camera = await stream_manager.get_camera(camera_id)
+    if not camera:
+        return {"error": f"Camera {camera_id} not found"}
+
+    # Start stream if configured
+    if camera.has_stream:
+        logger.info(f"Starting stream for new camera: {camera.name}")
+        result = await stream_manager.start_stream(camera_id)
+        return {
+            "success": result is not None,
+            "camera_id": camera_id,
+            "camera_name": camera.name,
+            "stream_started": result is not None,
+        }
+
+    return {
+        "success": True,
+        "camera_id": camera_id,
+        "camera_name": camera.name,
+        "stream_started": False,
+        "message": "Camera has no stream configured",
+    }
+
+
+async def handle_camera_deleted(params: dict) -> dict:
+    """Handle camera deleted event - stop stream and remove from cache."""
+    global stream_manager
+    camera_id = params.get("camera_id")
+
+    if not stream_manager or not camera_id:
+        return {"error": "Invalid request"}
+
+    logger.info(f"Camera deleted event received: {camera_id}")
+
+    # Stop stream if running
+    stream_stopped = False
+    if camera_id in stream_manager.active_streams:
+        logger.info(f"Stopping stream for deleted camera: {camera_id}")
+        await stream_manager.stop_stream(camera_id)
+        stream_stopped = True
+
+    # Remove from camera cache
+    stream_manager.remove_camera(camera_id)
+
+    return {
+        "success": True,
+        "camera_id": camera_id,
+        "stream_stopped": stream_stopped,
+    }
+
+
+async def handle_camera_updated(params: dict) -> dict:
+    """Handle camera updated event - refresh camera and restart stream if needed."""
+    global stream_manager
+    camera_id = params.get("camera_id")
+
+    if not stream_manager or not camera_id:
+        return {"error": "Invalid request"}
+
+    logger.info(f"Camera updated event received: {camera_id}")
+
+    # Check if stream was running
+    was_streaming = camera_id in stream_manager.active_streams
+
+    # Stop current stream if running
+    if was_streaming:
+        logger.info(f"Stopping stream for camera update: {camera_id}")
+        await stream_manager.stop_stream(camera_id)
+
+    # Fetch updated camera from backend
+    camera = await stream_manager.get_camera(camera_id)
+    if not camera:
+        return {"error": f"Camera {camera_id} not found"}
+
+    # Restart stream if it was running and still has stream config
+    stream_restarted = False
+    if was_streaming and camera.has_stream:
+        logger.info(f"Restarting stream for updated camera: {camera.name}")
+        result = await stream_manager.start_stream(camera_id)
+        stream_restarted = result is not None
+
+    return {
+        "success": True,
+        "camera_id": camera_id,
+        "camera_name": camera.name,
+        "was_streaming": was_streaming,
+        "stream_restarted": stream_restarted,
+    }
+
+
 async def on_tunnel_config(config: dict) -> None:
     """Handle tunnel configuration from gateway."""
     global tunnel_manager
@@ -226,6 +327,9 @@ async def main():
     gateway_client.register_command_handler('get_status', handle_get_status)
     gateway_client.register_command_handler('restart_stream', handle_restart_stream)
     gateway_client.register_command_handler('refresh_cameras', handle_refresh_cameras)
+    gateway_client.register_command_handler('camera_created', handle_camera_created)
+    gateway_client.register_command_handler('camera_deleted', handle_camera_deleted)
+    gateway_client.register_command_handler('camera_updated', handle_camera_updated)
 
     # Register tunnel config callback
     gateway_client.on_tunnel_config = on_tunnel_config

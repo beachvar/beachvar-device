@@ -6,10 +6,12 @@ Handles communication with backend API and FFmpeg processes.
 import asyncio
 import logging
 import os
+import re
 import signal
 import subprocess
 from dataclasses import dataclass, field
 from typing import Optional, Callable
+from urllib.parse import quote, urlparse, urlunparse
 
 import aiohttp
 
@@ -68,9 +70,21 @@ class StreamManager:
         self._running = False
 
     @property
-    def cameras(self) -> list[CameraConfig]:
+    def cameras(self) -> dict[str, CameraConfig]:
+        """Get dict of registered cameras by ID."""
+        return self._cameras
+
+    def get_camera_list(self) -> list[CameraConfig]:
         """Get list of registered cameras."""
         return list(self._cameras.values())
+
+    def remove_camera(self, camera_id: str) -> bool:
+        """Remove a camera from the cache."""
+        if camera_id in self._cameras:
+            del self._cameras[camera_id]
+            logger.info(f"Removed camera {camera_id} from cache")
+            return True
+        return False
 
     @property
     def active_streams(self) -> list[str]:
@@ -372,6 +386,31 @@ class StreamManager:
 
     # ==================== FFmpeg Management ====================
 
+    def _encode_rtsp_url(self, rtsp_url: str) -> str:
+        """
+        URL encode password in RTSP URL to handle special characters.
+
+        Handles URLs like: rtsp://user:pass!word@host:port/path
+        """
+        # Parse the URL
+        match = re.match(
+            r'^(rtsp://)?([^:]+):([^@]+)@(.+)$',
+            rtsp_url
+        )
+
+        if match:
+            scheme = match.group(1) or "rtsp://"
+            user = match.group(2)
+            password = match.group(3)
+            rest = match.group(4)
+
+            # URL encode the password
+            encoded_password = quote(password, safe='')
+
+            return f"{scheme}{user}:{encoded_password}@{rest}"
+
+        return rtsp_url
+
     def _start_ffmpeg(self, camera: CameraConfig) -> subprocess.Popen:
         """
         Start FFmpeg process to stream from RTSP to RTMPS.
@@ -385,15 +424,19 @@ class StreamManager:
         if not camera.stream:
             raise ValueError("Camera has no stream configured")
 
-        rtsp_url = camera.rtsp_url
-        rtmps_url = camera.stream.rtmps_full_url
+        rtsp_url = self._encode_rtsp_url(camera.rtsp_url)
 
-        # FFmpeg command for RTSP to RTMPS streaming
-        # Optimized for low CPU usage with codec copy when possible
+        # Use RTMPS for Cloudflare Stream
+        output_url = camera.stream.rtmps_full_url
+        output_format = "flv"
+        protocol = "RTMPS"
+
+        # FFmpeg command for RTSP streaming
+        # Using codec copy for minimal CPU usage
         cmd = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "error",
+            "-loglevel", "warning",
 
             # Input options - optimized for RTSP
             "-rtsp_transport", "tcp",  # Use TCP for RTSP (more reliable)
@@ -402,13 +445,13 @@ class StreamManager:
             "-use_wallclock_as_timestamps", "1",  # Use wall clock for timestamps
             "-i", rtsp_url,
 
-            # Map video and audio (audio optional - won't fail if not present)
+            # Map video and audio
             "-map", "0:v:0",
             "-map", "0:a:0?",
 
-            # Video: copy if already H.264, minimal CPU usage
+            # Video: copy codec (H.264 passthrough)
             "-c:v", "copy",
-            "-bsf:v", "h264_mp4toannexb",  # Required for FLV output
+            "-bsf:v", "h264_mp4toannexb",
 
             # Audio: transcode to AAC
             "-c:a", "aac",
@@ -417,13 +460,14 @@ class StreamManager:
 
             # Output options
             "-max_muxing_queue_size", "1024",
-            "-f", "flv",
-            rtmps_url,
+            "-f", output_format,
+            output_url,
         ]
 
-        logger.info(f"Starting FFmpeg for camera {camera.name}: {rtsp_url} -> RTMPS")
+        logger.info(f"Starting FFmpeg for camera {camera.name}: {rtsp_url} -> {protocol}")
+        logger.debug(f"FFmpeg command: {' '.join(cmd)}")
 
-        # Start FFmpeg as subprocess
+        # Start FFmpeg as subprocess with stderr captured
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
@@ -514,8 +558,8 @@ class StreamManager:
                         returncode = stream.process.returncode
                         stderr = ""
                         try:
-                            _, stderr = stream.process.communicate(timeout=1)
-                            stderr = stderr.decode("utf-8", errors="ignore")[-500:]
+                            stderr_bytes = stream.process.stderr.read()
+                            stderr = stderr_bytes.decode("utf-8", errors="ignore")[-1000:]
                         except Exception:
                             pass
 
@@ -523,6 +567,8 @@ class StreamManager:
                         error_msg = f"FFmpeg exited with code {returncode}"
                         if stderr:
                             error_msg += f": {stderr}"
+
+                        logger.error(f"FFmpeg error for camera {camera_id}: {error_msg}")
 
                         await self._update_stream_status(
                             camera_id,

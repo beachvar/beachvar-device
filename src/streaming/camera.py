@@ -21,7 +21,9 @@ class StreamConfig:
     @property
     def rtmps_full_url(self) -> str:
         """Get full RTMPS URL with stream key."""
-        return f"{self.rtmps_url}/{self.rtmps_key}"
+        # Remove trailing slash from URL if present to avoid double slashes
+        url = self.rtmps_url.rstrip("/")
+        return f"{url}/{self.rtmps_key}"
 
 
 @dataclass
