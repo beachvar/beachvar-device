@@ -124,7 +124,8 @@ class StreamManager:
                 async with session.get(url, headers=self._get_headers()) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        cameras = [CameraConfig.from_dict(c) for c in data]
+                        camera_list = data.get("cameras", [])
+                        cameras = [CameraConfig.from_dict(c) for c in camera_list]
                         self._cameras = {c.id: c for c in cameras}
                         logger.info(f"Loaded {len(cameras)} cameras from backend")
                         return cameras
@@ -359,7 +360,8 @@ class StreamManager:
                 async with session.get(url, headers=self._get_headers()) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        return [LiveStreamInfo.from_dict(s) for s in data]
+                        stream_list = data.get("streams", [])
+                        return [LiveStreamInfo.from_dict(s) for s in stream_list]
                     else:
                         return []
         except Exception as e:
