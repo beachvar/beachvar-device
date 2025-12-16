@@ -7,7 +7,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies using uv sync (uses lockfile for reproducible builds)
-RUN uv sync --frozen --no-install-project
+RUN uv sync --frozen --no-dev
 
 
 # Stage 2: Final image
