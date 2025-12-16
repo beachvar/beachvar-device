@@ -565,10 +565,8 @@ class StreamManager:
             "-f", "hls",
             "-hls_time", "2",            # 2-second segments
             "-hls_list_size", "3600",    # Keep last 3600 segments in playlist (2 hours DVR window)
-            "-hls_flags", "delete_segments+second_level_segment_index",  # Delete old files + use timestamp
-            # Segment filename: {token}_{unix_timestamp}.ts (e.g., a3b7c9d1_1702655422.ts)
-            # %%t = Unix timestamp (replaced by FFmpeg with second_level_segment_index)
-            "-hls_segment_filename", os.path.join(hls_dir, f"{segment_token}_%%t.ts"),
+            "-hls_flags", "delete_segments",  # Delete old segment files
+            "-hls_segment_filename", os.path.join(hls_dir, f"{segment_token}_%03d.ts"),
             output_path,
         ]
 
