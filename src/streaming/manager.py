@@ -524,12 +524,17 @@ class StreamManager:
     def _build_hls_ffmpeg_cmd(self, camera: CameraConfig, rtsp_url: str) -> list[str]:
         """Build FFmpeg command for local HLS output."""
         import os
+        import secrets
 
         # Create HLS directory for this camera
         hls_dir = os.path.join(HLS_OUTPUT_DIR, camera.id)
         os.makedirs(hls_dir, exist_ok=True)
 
         output_path = os.path.join(hls_dir, "playlist.m3u8")
+
+        # Generate random token for segment filenames (security through obscurity)
+        # This makes it harder to guess segment URLs without the playlist
+        segment_token = secrets.token_hex(8)  # 16 chars hex
 
         return [
             "ffmpeg",
@@ -557,8 +562,10 @@ class StreamManager:
             "-f", "hls",
             "-hls_time", "2",            # 2-second segments
             "-hls_list_size", "3600",    # Keep last 3600 segments in playlist (2 hours DVR window)
-            "-hls_flags", "delete_segments",  # Delete old segment files
-            "-hls_segment_filename", os.path.join(hls_dir, "segment_%03d.ts"),
+            "-hls_flags", "delete_segments+second_level_segment_index",  # Delete old files + use timestamp
+            # Segment filename: {token}_{unix_timestamp}.ts (e.g., a3b7c9d1_1702655422.ts)
+            # %%t = Unix timestamp (replaced by FFmpeg with second_level_segment_index)
+            "-hls_segment_filename", os.path.join(hls_dir, f"{segment_token}_%%t.ts"),
             output_path,
         ]
 
