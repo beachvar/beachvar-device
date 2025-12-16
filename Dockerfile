@@ -1,22 +1,17 @@
 # Stage 1: Build dependencies (cached unless pyproject.toml/uv.lock change)
-FROM python:3.12-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
 WORKDIR /app
-
-# Install uv for fast dependency management
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Copy dependency files first (for layer caching)
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies using uv sync (uses lockfile for reproducible builds)
-# --frozen: fail if lockfile is out of date
-# --no-install-project: don't install the project itself (we just need deps)
 RUN uv sync --frozen --no-install-project
 
 
 # Stage 2: Final image
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
@@ -48,9 +43,9 @@ COPY src/ src/
 COPY main.py .
 
 # Environment variables
-ENV PYTHONUNBUFFERED=1
-ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
-# Run the device using the venv python explicitly
-CMD ["/app/.venv/bin/python", "main.py"]
+# Run the device
+CMD ["python", "main.py"]
