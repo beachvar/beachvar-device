@@ -1,6 +1,7 @@
 services:
   device:
     build: .
+    command: python -O main.py
     env_file:
       - .env
     ports:

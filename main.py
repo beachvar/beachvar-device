@@ -16,6 +16,7 @@ import os
 import signal
 from pathlib import Path
 
+import uvloop
 from dotenv import load_dotenv
 
 from src.gateway import GatewayClient
@@ -382,4 +383,6 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
+    # Use uvloop for better async performance
+    uvloop.install()
     asyncio.run(main())
