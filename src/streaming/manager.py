@@ -567,8 +567,10 @@ class StreamManager:
             # Most IP cameras already output H.264, so just pass through
             "-c:v", "copy",
 
-            # Audio: copy if available (most cameras use AAC)
-            "-c:a", "copy",
+            # Audio: transcode to AAC (HLS requires AAC, cameras may use other codecs)
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-ar", "44100",
 
             # HLS output options for live streaming
             "-f", "hls",
