@@ -556,7 +556,7 @@ class StreamManager:
             # HLS output options for live streaming
             "-f", "hls",
             "-hls_time", "2",            # 2-second segments
-            "-hls_list_size", "60",      # Keep last 60 segments in playlist (2 min DVR window)
+            "-hls_list_size", "3600",    # Keep last 3600 segments in playlist (2 hours DVR window)
             "-hls_flags", "delete_segments",  # Delete old segment files
             "-hls_segment_filename", os.path.join(hls_dir, "segment_%03d.ts"),
             output_path,
