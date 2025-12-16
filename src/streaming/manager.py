@@ -546,23 +546,12 @@ class StreamManager:
             "-map", "0:v:0",
             "-map", "0:a:0?",
 
-            # Video: re-encode to H.264 with good compression
-            # 'veryfast' preset: good balance between speed and compression
-            # CRF 23: good quality with reasonable file size
-            # tune=zerolatency: minimize latency for live streaming
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-tune", "zerolatency",
-            "-crf", "23",
-            "-maxrate", "2500k",  # Cap bitrate at 2.5 Mbps
-            "-bufsize", "5000k",  # Buffer size for rate control
-            "-g", "60",  # GOP size (keyframe every 60 frames = 2s at 30fps)
-            "-force_key_frames", "expr:gte(t,n_forced*2)",  # Force keyframe every 2 seconds
+            # Video: stream copy (no re-encoding) - uses ~0% CPU
+            # Most IP cameras already output H.264, so just pass through
+            "-c:v", "copy",
 
-            # Audio: transcode to AAC
-            "-c:a", "aac",
-            "-b:a", "96k",  # 96kbps is enough for speech/ambient
-            "-ar", "44100",
+            # Audio: copy if available (most cameras use AAC)
+            "-c:a", "copy",
 
             # HLS output options for live streaming
             "-f", "hls",
