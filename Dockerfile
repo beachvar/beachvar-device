@@ -1,17 +1,4 @@
-# Stage 1: Build dependencies (cached unless pyproject.toml/uv.lock change)
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
-
-WORKDIR /app
-
-# Copy dependency files first (for layer caching)
-COPY pyproject.toml uv.lock ./
-
-# Install dependencies using uv sync (uses lockfile for reproducible builds)
-RUN uv sync --frozen --no-dev
-
-
-# Stage 2: Final image
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -24,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cloudflared (optional, for tunnel support)
+# Detect architecture and download appropriate binary
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then \
         CLOUDFLARED_ARCH="linux-arm64"; \
@@ -35,17 +23,19 @@ RUN ARCH=$(dpkg --print-architecture) && \
     curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${CLOUDFLARED_ARCH}" \
     -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
 
-# Copy virtual environment from builder (dependencies already installed)
-COPY --from=builder /app/.venv /app/.venv
+# Install uv for fast dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy application code (changes frequently, so comes last)
+# Copy project files
+COPY pyproject.toml .
 COPY src/ src/
 COPY main.py .
 
+# Install dependencies
+RUN uv pip install --system -e .
+
 # Environment variables
-ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
 
 # Run the device
 CMD ["python", "main.py"]
