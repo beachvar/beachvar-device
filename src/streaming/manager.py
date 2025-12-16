@@ -726,8 +726,10 @@ class StreamManager:
         health_check_interval = 30  # Full health check every 30 seconds
         stable_stream_threshold = 120  # Reset retries after 2 minutes of stable stream
         url_refresh_interval = 6 * 3600  # Refresh HLS URLs every 6 hours (half of 12h expiry)
+        stream_heartbeat_interval = 10  # Send heartbeat to backend every 10 seconds
         last_health_check = 0
         last_url_refresh: dict[str, float] = {}  # Track last URL refresh per camera
+        last_stream_heartbeat: dict[str, float] = {}  # Track last heartbeat per camera
 
         while self._running:
             try:
@@ -823,6 +825,17 @@ class StreamManager:
                         logger.info(f"Refreshing HLS URL for {camera.name} (URL expiring soon)")
                         await self._refresh_hls_url(camera_id)
                         last_url_refresh[camera_id] = current_time
+
+                # Send stream heartbeats to backend (every 10 seconds)
+                for camera_id, stream in list(self._streams.items()):
+                    if not stream.is_running:
+                        continue
+
+                    last_hb = last_stream_heartbeat.get(camera_id, 0)
+                    if current_time - last_hb >= stream_heartbeat_interval:
+                        # Send heartbeat (just update status to keep it alive)
+                        await self._update_stream_status(camera_id, "live")
+                        last_stream_heartbeat[camera_id] = current_time
 
             except asyncio.CancelledError:
                 break
