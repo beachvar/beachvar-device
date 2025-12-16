@@ -49,7 +49,8 @@ COPY main.py .
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
+ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Run the device
-CMD ["python", "main.py"]
+# Run the device using the venv python explicitly
+CMD ["/app/.venv/bin/python", "main.py"]
