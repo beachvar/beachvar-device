@@ -527,17 +527,26 @@ class StreamManager:
         import secrets
         import shutil
 
+        # Validate camera ID
+        if not camera.id:
+            raise ValueError(f"Camera ID is empty for camera: {camera.name}")
+
         # Create HLS directory for this camera (clean first to remove old segments)
         hls_dir = os.path.join(HLS_OUTPUT_DIR, camera.id)
+        logger.info(f"HLS directory for {camera.name}: {hls_dir}")
+
         if os.path.exists(hls_dir):
             shutil.rmtree(hls_dir)
         os.makedirs(hls_dir, exist_ok=True)
 
         output_path = os.path.join(hls_dir, "playlist.m3u8")
+        logger.info(f"HLS output path: {output_path}")
 
         # Generate random token for segment filenames (security through obscurity)
         # This makes it harder to guess segment URLs without the playlist
         segment_token = secrets.token_hex(8)  # 16 chars hex
+        segment_pattern = os.path.join(hls_dir, f"{segment_token}_%03d.ts")
+        logger.info(f"HLS segment pattern: {segment_pattern}")
 
         return [
             "ffmpeg",
@@ -566,7 +575,7 @@ class StreamManager:
             "-hls_time", "2",            # 2-second segments
             "-hls_list_size", "3600",    # Keep last 3600 segments in playlist (2 hours DVR window)
             "-hls_flags", "delete_segments",  # Delete old segment files
-            "-hls_segment_filename", os.path.join(hls_dir, f"{segment_token}_%03d.ts"),
+            "-hls_segment_filename", segment_pattern,
             output_path,
         ]
 
