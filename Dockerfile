@@ -2,12 +2,18 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Set timezone to Brazil
+ENV TZ=America/Sao_Paulo
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     v4l-utils \
     usbutils \
     ffmpeg \
+    tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cloudflared (optional, for tunnel support)
