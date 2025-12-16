@@ -1,14 +1,16 @@
 """
 HTTP server for device remote access.
 Provides REST API for device management and monitoring.
+
+HLS Security Note:
+- HLS files are served publicly without authentication
+- Security is handled by Cloudflare Snippet which validates HMAC signatures
+- Backend generates signed URLs, Cloudflare validates them at the edge
 """
 
 import asyncio
-import hashlib
-import hmac
 import logging
 import os
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -23,9 +25,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 # HLS output directory
 HLS_DIR = Path("/tmp/hls")
-
-# URL signature settings
-HLS_SIGNATURE_EXPIRY_HOURS = 12
 
 
 class DeviceHTTPServer:
@@ -46,61 +45,6 @@ class DeviceHTTPServer:
         self.device_token = device_token or os.getenv("DEVICE_TOKEN", "")
         self.stream_manager = stream_manager
         self._setup_routes()
-
-    # ==================== URL Signing ====================
-
-    def _generate_signature(self, camera_id: str, expires: int) -> str:
-        """Generate HMAC signature for HLS URL."""
-        message = f"{camera_id}:{expires}"
-        signature = hmac.new(
-            self.device_token.encode(),
-            message.encode(),
-            hashlib.sha256
-        ).hexdigest()
-        return signature
-
-    def _verify_signature(self, camera_id: str, expires: int, signature: str) -> bool:
-        """Verify HMAC signature for HLS URL."""
-        if not self.device_token:
-            # No token configured, allow all (for development)
-            logger.warning("No device_token configured, allowing unsigned HLS access")
-            return True
-
-        # Check expiration
-        if time.time() > expires:
-            logger.warning(f"HLS signature expired for camera {camera_id}")
-            return False
-
-        # Verify signature
-        expected = self._generate_signature(camera_id, expires)
-        if not hmac.compare_digest(signature, expected):
-            logger.warning(f"Invalid HLS signature for camera {camera_id}")
-            return False
-
-        return True
-
-    def generate_signed_hls_url(self, camera_id: str, base_url: str) -> dict:
-        """
-        Generate a signed HLS URL with expiration.
-
-        Args:
-            camera_id: Camera UUID
-            base_url: Base URL for the device (e.g., https://device.tunnel.com)
-
-        Returns:
-            Dict with signed URL and expiration info
-        """
-        expires = int(time.time()) + (HLS_SIGNATURE_EXPIRY_HOURS * 3600)
-        signature = self._generate_signature(camera_id, expires)
-
-        # Build signed URL
-        signed_url = f"{base_url}/hls/{camera_id}/playlist.m3u8?expires={expires}&sig={signature}"
-
-        return {
-            "url": signed_url,
-            "expires": expires,
-            "expires_in_hours": HLS_SIGNATURE_EXPIRY_HOURS,
-        }
 
     def _setup_routes(self) -> None:
         """Setup HTTP routes."""
@@ -125,10 +69,7 @@ class DeviceHTTPServer:
         self.app.router.add_post("/manager/streams/{camera_id}/stop", self.handle_stream_stop)
         self.app.router.add_get("/manager/streams/{camera_id}/status", self.handle_stream_status)
 
-        # HLS URL signing (protected by Zero Trust, generates signed URLs)
-        self.app.router.add_get("/manager/hls/{camera_id}/sign", self.handle_hls_sign)
-
-        # HLS streaming (public - protected by HMAC signature)
+        # HLS streaming (public - security handled by Cloudflare Snippet)
         self.app.router.add_get("/hls/{camera_id}/{filename}", self.handle_hls_file)
 
         # Static files / frontend (protected by Zero Trust: /manager/*)
@@ -168,7 +109,7 @@ class DeviceHTTPServer:
             "endpoints": {
                 "public": [
                     "/health",
-                    "/hls/{camera_id}/{filename}?expires=...&sig=...",
+                    "/hls/{camera_id}/{filename}",
                 ],
                 "manager": [
                     "/manager/ (this page)",
@@ -179,7 +120,6 @@ class DeviceHTTPServer:
                     "/manager/restart",
                     "/manager/registered-cameras",
                     "/manager/streams",
-                    "/manager/hls/{camera_id}/sign",
                 ],
             },
         })
@@ -188,35 +128,15 @@ class DeviceHTTPServer:
         """Health check endpoint."""
         return web.json_response({"status": "ok"})
 
-    async def handle_hls_sign(self, request: web.Request) -> web.Response:
-        """
-        Generate a signed HLS URL for a camera.
-        This endpoint should be protected by Zero Trust.
-        GET /api/hls/{camera_id}/sign
-        """
-        camera_id = request.match_info.get("camera_id")
-        if not camera_id:
-            return web.json_response({"error": "Camera ID required"}, status=400)
-
-        # Get base URL from request or header
-        # Cloudflare sets CF-Connecting-IP and other headers
-        host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host", "")
-        scheme = request.headers.get("X-Forwarded-Proto", "https")
-        base_url = f"{scheme}://{host}"
-
-        # Generate signed URL
-        signed = self.generate_signed_hls_url(camera_id, base_url)
-
-        return web.json_response({
-            "camera_id": camera_id,
-            "signed_url": signed["url"],
-            "expires": signed["expires"],
-            "expires_in_hours": signed["expires_in_hours"],
-            "message": "Use this URL to access HLS stream. URL expires in 12 hours.",
-        })
-
     async def handle_hls_file(self, request: web.Request) -> web.Response:
-        """Serve HLS files (m3u8 playlist and .ts segments) with CORS headers and signature validation."""
+        """
+        Serve HLS files (m3u8 playlist and .ts segments) with CORS headers.
+
+        Security Note:
+        - Files are served publicly without authentication
+        - Security is handled by Cloudflare Snippet which validates HMAC signatures
+        - Backend generates signed URLs, Cloudflare validates them at the edge
+        """
         camera_id = request.match_info.get("camera_id")
         filename = request.match_info.get("filename")
 
@@ -231,46 +151,12 @@ class DeviceHTTPServer:
         if ".." in camera_id or ".." in filename:
             return web.Response(status=400, text="Invalid path")
 
-        # Validate signature only for playlist files (m3u8), not segments (ts)
-        # Segments are referenced by the playlist without query params, so we can't require signatures
-        # The playlist URL is the entry point that needs protection
-        is_playlist = filename.endswith(".m3u8")
-
-        if self.device_token and is_playlist:
-            expires_str = request.query.get("expires", "")
-            signature = request.query.get("sig", "")
-
-            if not expires_str or not signature:
-                return web.Response(
-                    status=403,
-                    text="Missing signature. Use /manager/hls/{camera_id}/sign to get a signed URL.",
-                    headers={"Access-Control-Allow-Origin": "*"},
-                )
-
-            try:
-                expires = int(expires_str)
-            except ValueError:
-                return web.Response(
-                    status=403,
-                    text="Invalid expires parameter",
-                    headers={"Access-Control-Allow-Origin": "*"},
-                )
-
-            if not self._verify_signature(camera_id, expires, signature):
-                return web.Response(
-                    status=403,
-                    text="Invalid or expired signature",
-                    headers={"Access-Control-Allow-Origin": "*"},
-                )
-
         file_path = HLS_DIR / camera_id / filename
 
         if not file_path.exists():
             return web.Response(status=404, text="File not found")
 
         # Use FileResponse for efficient streaming (sendfile syscall when available)
-        # Note: signature validation only on playlist (m3u8), segments served freely
-        # This is acceptable because segments are temporary and require playlist URL to discover
         try:
             response = web.FileResponse(
                 file_path,
