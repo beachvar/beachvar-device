@@ -525,9 +525,12 @@ class StreamManager:
         """Build FFmpeg command for local HLS output."""
         import os
         import secrets
+        import shutil
 
-        # Create HLS directory for this camera
+        # Create HLS directory for this camera (clean first to remove old segments)
         hls_dir = os.path.join(HLS_OUTPUT_DIR, camera.id)
+        if os.path.exists(hls_dir):
+            shutil.rmtree(hls_dir)
         os.makedirs(hls_dir, exist_ok=True)
 
         output_path = os.path.join(hls_dir, "playlist.m3u8")
