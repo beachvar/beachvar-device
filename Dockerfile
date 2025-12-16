@@ -1,4 +1,4 @@
-# Stage 1: Build dependencies (cached unless pyproject.toml changes)
+# Stage 1: Build dependencies (cached unless pyproject.toml/uv.lock change)
 FROM python:3.12-slim AS builder
 
 WORKDIR /app
@@ -6,13 +6,13 @@ WORKDIR /app
 # Install uv for fast dependency management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy only dependency file first (for layer caching)
-COPY pyproject.toml .
+# Copy dependency files first (for layer caching)
+COPY pyproject.toml uv.lock ./
 
-# Create virtual environment and install dependencies
-# This layer is cached unless pyproject.toml changes
-RUN uv venv /app/.venv && \
-    uv pip install --python /app/.venv/bin/python -r pyproject.toml
+# Install dependencies using uv sync (uses lockfile for reproducible builds)
+# --frozen: fail if lockfile is out of date
+# --no-install-project: don't install the project itself (we just need deps)
+RUN uv sync --frozen --no-install-project
 
 
 # Stage 2: Final image
