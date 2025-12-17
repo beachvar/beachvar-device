@@ -147,11 +147,21 @@ class DeviceHTTPServer:
 
             cmd.extend(["-p", ssh_port, f"{ssh_user}@{ssh_host}"])
 
+            logger.info(f"Starting ttyd with command: {' '.join(cmd)}")
+
             self._ttyd_process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
+
+            # Give ttyd a moment to start and check if it's running
+            await asyncio.sleep(0.5)
+            if self._ttyd_process.poll() is not None:
+                stdout, stderr = self._ttyd_process.communicate()
+                logger.error(f"ttyd failed to start. stdout: {stdout.decode()}, stderr: {stderr.decode()}")
+                self._ttyd_process = None
+                return
 
             logger.info(f"ttyd web terminal started on port {self._ttyd_port} (SSH to {ssh_user}@{ssh_host}:{ssh_port})")
 
@@ -224,11 +234,16 @@ class DeviceHTTPServer:
 
     async def handle_terminal_proxy(self, request: web.Request) -> web.StreamResponse:
         """Proxy requests to ttyd web terminal."""
+        # Check if ttyd is running
+        if not self._ttyd_process or self._ttyd_process.poll() is not None:
+            logger.warning("ttyd process is not running")
+            return web.Response(status=503, text="Terminal not available - ttyd not running")
+
         # Get the path after /admin/terminal
-        # With --base-path, ttyd expects requests at root but generates URLs with base path
+        # ttyd uses window.location.pathname to construct URLs, so it expects to be at root
         path = request.match_info.get("path", "")
 
-        # Build URL - ttyd with --base-path still serves at root internally
+        # Build URL - proxy to ttyd at root
         url_path = f"/{path}" if path else "/"
 
         # Include query string if present
@@ -236,6 +251,7 @@ class DeviceHTTPServer:
             url_path = f"{url_path}?{request.query_string}"
 
         ttyd_url = f"http://127.0.0.1:{self._ttyd_port}{url_path}"
+        logger.debug(f"Terminal proxy: {request.path} -> {ttyd_url}")
 
         # Check if this is a WebSocket upgrade request
         if request.headers.get("Upgrade", "").lower() == "websocket":
