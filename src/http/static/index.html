@@ -3,360 +3,202 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BeachVar Device</title>
+    <title>BeachVar Device - Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: { 50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8', 800: '#1e40af', 900: '#1e3a8a' },
+                        dark: { 800: '#1e293b', 900: '#0f172a', 950: '#020617' }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            min-height: 100vh;
-            color: #fff;
-        }
-
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        header {
-            text-align: center;
-            padding: 30px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            margin-bottom: 30px;
-        }
-
-        .logo {
-            font-size: 2rem;
-            font-weight: 700;
-            color: #4facfe;
-            margin-bottom: 5px;
-        }
-
-        .logo span {
-            color: #00f2fe;
-        }
-
-        .subtitle {
-            color: rgba(255,255,255,0.6);
-            font-size: 0.9rem;
-        }
-
-        .status-card {
-            background: rgba(255,255,255,0.05);
-            border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 20px;
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .status-card h2 {
-            font-size: 1rem;
-            color: rgba(255,255,255,0.6);
-            margin-bottom: 16px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        .status-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 16px;
-        }
-
-        .status-item {
-            background: rgba(255,255,255,0.05);
-            border-radius: 12px;
-            padding: 16px;
-            text-align: center;
-        }
-
-        .status-item .label {
-            font-size: 0.75rem;
-            color: rgba(255,255,255,0.5);
-            margin-bottom: 8px;
-            text-transform: uppercase;
-        }
-
-        .status-item .value {
-            font-size: 1.5rem;
-            font-weight: 600;
-        }
-
-        .status-item .unit {
-            font-size: 0.8rem;
-            color: rgba(255,255,255,0.5);
-        }
-
-        .connection-status {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-
-        .connection-status.online {
-            background: rgba(46, 213, 115, 0.2);
-            color: #2ed573;
-        }
-
-        .connection-status.offline {
-            background: rgba(255, 71, 87, 0.2);
-            color: #ff4757;
-        }
-
-        .connection-status .dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: currentColor;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .actions {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-
-        .btn {
-            padding: 12px 24px;
-            border-radius: 8px;
-            border: none;
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-            color: #fff;
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(79, 172, 254, 0.4);
-        }
-
-        .btn-danger {
-            background: rgba(255, 71, 87, 0.2);
-            color: #ff4757;
-            border: 1px solid rgba(255, 71, 87, 0.3);
-        }
-
-        .btn-danger:hover {
-            background: rgba(255, 71, 87, 0.3);
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none !important;
-        }
-
-        footer {
-            text-align: center;
-            padding: 30px 0;
-            color: rgba(255,255,255,0.3);
-            font-size: 0.8rem;
-        }
-
-        .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 40px;
-        }
-
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid rgba(255,255,255,0.1);
-            border-top-color: #4facfe;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .refresh-btn {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 56px;
-            height: 56px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-            border: none;
-            color: #fff;
-            font-size: 1.5rem;
-            cursor: pointer;
-            box-shadow: 0 4px 20px rgba(79, 172, 254, 0.4);
-            transition: all 0.2s;
-        }
-
-        .refresh-btn:hover {
-            transform: scale(1.1);
-        }
-
-        .refresh-btn:active {
-            transform: scale(0.95);
-        }
-
-        /* Terminal styles */
-        .terminal-container {
-            background: #000;
-            border-radius: 12px;
-            overflow: hidden;
-            height: 400px;
-        }
-
-        .terminal-container iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-        }
-
-        .terminal-disabled {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 200px;
-            background: rgba(0,0,0,0.3);
-            border-radius: 12px;
-            color: rgba(255,255,255,0.5);
-            text-align: center;
-        }
-
-        .terminal-disabled .icon {
-            font-size: 3rem;
-            margin-bottom: 16px;
-            opacity: 0.5;
-        }
-
-        .card-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 16px;
-        }
-
-        .card-header h2 {
-            margin-bottom: 0;
-        }
-
-        .btn-sm {
-            padding: 8px 16px;
-            font-size: 0.8rem;
-        }
-
-        .terminal-info {
-            font-size: 0.85rem;
-            color: rgba(255,255,255,0.5);
-            margin-top: 8px;
-        }
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
     </style>
 </head>
-<body>
-    <div class="container">
-        <header>
-            <div class="logo">Beach<span>Var</span></div>
-            <div class="subtitle">Device Control Panel</div>
+<body class="bg-dark-950 text-gray-100 min-h-screen">
+    <!-- Sidebar -->
+    <aside class="fixed left-0 top-0 h-full w-64 bg-dark-900 border-r border-gray-800 hidden lg:block">
+        <div class="p-6 border-b border-gray-800">
+            <h1 class="text-xl font-bold">
+                <span class="text-primary-400">Beach</span><span class="text-cyan-400">Var</span>
+            </h1>
+            <p class="text-xs text-gray-500 mt-1">Device Admin Panel</p>
+        </div>
+        <nav class="p-4">
+            <ul class="space-y-2">
+                <li>
+                    <a href="#" class="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary-500/10 text-primary-400 font-medium">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+                        Dashboard
+                    </a>
+                </li>
+                <li>
+                    <a href="#" onclick="openTerminal(); return false;" class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-gray-200 transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        Terminal SSH
+                    </a>
+                </li>
+            </ul>
+        </nav>
+        <div class="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-800">
+            <div class="text-xs text-gray-500">
+                <p>Device ID</p>
+                <p id="sidebar-device-id" class="text-gray-400 font-mono truncate">--</p>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="lg:ml-64 min-h-screen">
+        <!-- Top Bar -->
+        <header class="sticky top-0 z-10 bg-dark-900/80 backdrop-blur-sm border-b border-gray-800">
+            <div class="px-6 py-4 flex items-center justify-between">
+                <!-- Mobile Logo -->
+                <div class="lg:hidden">
+                    <h1 class="text-lg font-bold">
+                        <span class="text-primary-400">Beach</span><span class="text-cyan-400">Var</span>
+                    </h1>
+                </div>
+
+                <!-- Status Badge -->
+                <div id="connection-status" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-800 text-sm">
+                    <span id="status-dot" class="w-2 h-2 rounded-full bg-gray-500 pulse-dot"></span>
+                    <span id="connection-text" class="text-gray-400">Conectando...</span>
+                </div>
+
+                <!-- Actions -->
+                <div class="flex items-center gap-3">
+                    <button onclick="refreshData()" class="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors" title="Atualizar">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    </button>
+                </div>
+            </div>
         </header>
 
-        <div id="connection-status" class="connection-status offline">
-            <span class="dot"></span>
-            <span id="connection-text">Conectando...</span>
-        </div>
+        <!-- Dashboard Content -->
+        <div class="p-6">
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <!-- CPU -->
+                <div class="bg-dark-900 rounded-xl p-5 border border-gray-800">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">CPU</span>
+                        <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
+                        </div>
+                    </div>
+                    <p class="text-2xl font-bold"><span id="cpu-usage">--</span><span class="text-sm font-normal text-gray-500">%</span></p>
+                </div>
 
-        <div class="status-card">
-            <h2>Sistema</h2>
-            <div class="status-grid">
-                <div class="status-item">
-                    <div class="label">CPU</div>
-                    <div class="value"><span id="cpu-usage">--</span><span class="unit">%</span></div>
+                <!-- Memory -->
+                <div class="bg-dark-900 rounded-xl p-5 border border-gray-800">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">Memoria</span>
+                        <div class="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                            <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                        </div>
+                    </div>
+                    <p class="text-2xl font-bold"><span id="memory-usage">--</span><span class="text-sm font-normal text-gray-500">%</span></p>
                 </div>
-                <div class="status-item">
-                    <div class="label">Memoria</div>
-                    <div class="value"><span id="memory-usage">--</span><span class="unit">%</span></div>
+
+                <!-- Temperature -->
+                <div class="bg-dark-900 rounded-xl p-5 border border-gray-800">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">Temperatura</span>
+                        <div class="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                            <svg class="w-4 h-4 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                        </div>
+                    </div>
+                    <p class="text-2xl font-bold"><span id="temperature">--</span><span class="text-sm font-normal text-gray-500">°C</span></p>
                 </div>
-                <div class="status-item">
-                    <div class="label">Temperatura</div>
-                    <div class="value"><span id="temperature">--</span><span class="unit">°C</span></div>
-                </div>
-                <div class="status-item">
-                    <div class="label">Uptime</div>
-                    <div class="value" id="uptime">--</div>
+
+                <!-- Uptime -->
+                <div class="bg-dark-900 rounded-xl p-5 border border-gray-800">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">Uptime</span>
+                        <div class="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center">
+                            <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </div>
+                    </div>
+                    <p class="text-2xl font-bold" id="uptime">--</p>
                 </div>
             </div>
-        </div>
 
-        <div class="status-card">
-            <div class="card-header">
-                <h2>Terminal SSH</h2>
-                <span id="terminal-info" class="terminal-info"></span>
-            </div>
-            <div id="terminal-container">
-                <div class="terminal-disabled">
-                    <div>
-                        <div class="icon">💻</div>
-                        <p>Carregando terminal...</p>
+            <!-- Cards Row -->
+            <div class="grid lg:grid-cols-2 gap-6">
+                <!-- Terminal Card -->
+                <div class="bg-dark-900 rounded-xl border border-gray-800 overflow-hidden">
+                    <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                                <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold">Terminal SSH</h3>
+                                <p id="terminal-info" class="text-sm text-gray-500">Carregando...</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-5" id="terminal-container">
+                        <div class="flex flex-col items-center justify-center py-8 text-center">
+                            <div class="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center mb-4">
+                                <svg class="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                            </div>
+                            <p class="text-gray-500">Carregando terminal...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions Card -->
+                <div class="bg-dark-900 rounded-xl border border-gray-800 overflow-hidden">
+                    <div class="px-5 py-4 border-b border-gray-800 flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                            <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold">Acoes do Sistema</h3>
+                            <p class="text-sm text-gray-500">Gerenciar device</p>
+                        </div>
+                    </div>
+                    <div class="p-5 space-y-3">
+                        <button onclick="refreshData()" class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition-colors font-medium">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                            Atualizar Status
+                        </button>
+                        <button onclick="restartDevice()" class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors font-medium">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                            Reiniciar Device
+                        </button>
                     </div>
                 </div>
             </div>
+
+            <!-- Footer -->
+            <footer class="mt-8 text-center text-sm text-gray-600">
+                <p>BeachVar Device v1.0 | <span id="device-id" class="font-mono">--</span></p>
+            </footer>
         </div>
-
-        <div class="status-card">
-            <h2>Acoes</h2>
-            <div class="actions">
-                <button class="btn btn-primary" onclick="refreshData()">
-                    Atualizar
-                </button>
-                <button class="btn btn-danger" onclick="restartDevice()">
-                    Reiniciar Device
-                </button>
-            </div>
-        </div>
-
-        <footer>
-            BeachVar Device v1.0 | <span id="device-id">--</span>
-        </footer>
-    </div>
-
-    <button class="refresh-btn" onclick="refreshData()" title="Atualizar">
-        ↻
-    </button>
+    </main>
 
     <script>
         let refreshInterval;
+        let terminalUrl = '';
 
         async function fetchStatus() {
             try {
                 const response = await fetch('/admin/status');
                 const data = await response.json();
-
                 updateConnectionStatus(true);
-                document.getElementById('device-id').textContent = data.device_id || '--';
-
+                const deviceId = data.device_id || '--';
+                document.getElementById('device-id').textContent = deviceId;
+                document.getElementById('sidebar-device-id').textContent = deviceId;
                 return data;
             } catch (error) {
                 console.error('Error fetching status:', error);
@@ -369,12 +211,10 @@
             try {
                 const response = await fetch('/admin/system');
                 const data = await response.json();
-
                 document.getElementById('cpu-usage').textContent = data.cpu_percent?.toFixed(1) || '--';
                 document.getElementById('memory-usage').textContent = data.memory_percent?.toFixed(1) || '--';
                 document.getElementById('temperature').textContent = data.temperature?.toFixed(1) || '--';
                 document.getElementById('uptime').textContent = formatUptime(data.uptime_seconds);
-
                 return data;
             } catch (error) {
                 console.error('Error fetching system:', error);
@@ -386,95 +226,96 @@
             try {
                 const response = await fetch('/admin/terminal-config');
                 const data = await response.json();
-
                 const container = document.getElementById('terminal-container');
                 const info = document.getElementById('terminal-info');
 
                 if (data.enabled) {
-                    // Use /admin/terminal/ path - proxied through Python server
-                    const ttydUrl = `${window.location.origin}/admin/terminal/`;
-
+                    terminalUrl = `${window.location.origin}/admin/terminal/`;
+                    info.textContent = `${data.ssh_user}@${data.ssh_host}`;
                     container.innerHTML = `
-                        <div class="terminal-container">
-                            <iframe src="${ttydUrl}" title="Terminal SSH" allow="clipboard-read; clipboard-write"></iframe>
-                        </div>
-                        <p style="font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-top: 8px; text-align: center;">
-                            Clique dentro do terminal para digitar
-                        </p>
-                    `;
-                    info.textContent = `Conectado: ${data.ssh_user}@${data.ssh_host}`;
-                } else {
-                    container.innerHTML = `
-                        <div class="terminal-disabled">
-                            <div>
-                                <div class="icon">💻</div>
-                                <p>Terminal SSH desabilitado</p>
-                                <p style="font-size: 0.8rem; opacity: 0.7;">Configure SSH_HOST, SSH_USER e SSH_PORT</p>
+                        <div class="flex flex-col items-center justify-center py-8 text-center">
+                            <div class="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mb-4">
+                                <svg class="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                             </div>
+                            <p class="text-gray-300 font-medium mb-1">Terminal SSH disponivel</p>
+                            <p class="text-sm text-gray-500 mb-4">${data.ssh_user}@${data.ssh_host}</p>
+                            <button onclick="openTerminal()" class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-medium transition-colors">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                                Abrir Terminal
+                            </button>
                         </div>
                     `;
-                    info.textContent = '';
+                } else {
+                    info.textContent = 'Desabilitado';
+                    container.innerHTML = `
+                        <div class="flex flex-col items-center justify-center py-8 text-center">
+                            <div class="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center mb-4">
+                                <svg class="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+                            </div>
+                            <p class="text-gray-400 font-medium mb-1">Terminal SSH desabilitado</p>
+                            <p class="text-sm text-gray-600">Configure SSH_HOST, SSH_USER e SSH_PORT</p>
+                        </div>
+                    `;
                 }
-
                 return data;
             } catch (error) {
                 console.error('Error fetching terminal config:', error);
+                document.getElementById('terminal-info').textContent = 'Erro';
                 document.getElementById('terminal-container').innerHTML = `
-                    <div class="terminal-disabled">
-                        <div>
-                            <div class="icon">❌</div>
-                            <p>Erro ao carregar terminal</p>
+                    <div class="flex flex-col items-center justify-center py-8 text-center">
+                        <div class="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
+                            <svg class="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                         </div>
+                        <p class="text-red-400 font-medium">Erro ao carregar terminal</p>
                     </div>
                 `;
                 return null;
             }
         }
 
+        function openTerminal() {
+            if (terminalUrl) {
+                window.open(terminalUrl, '_blank');
+            }
+        }
+
         function updateConnectionStatus(online) {
-            const el = document.getElementById('connection-status');
+            const dot = document.getElementById('status-dot');
             const text = document.getElementById('connection-text');
+            const container = document.getElementById('connection-status');
 
             if (online) {
-                el.className = 'connection-status online';
-                text.textContent = 'Conectado';
+                dot.className = 'w-2 h-2 rounded-full bg-green-500 pulse-dot';
+                text.textContent = 'Online';
+                text.className = 'text-green-400';
+                container.className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 text-sm';
             } else {
-                el.className = 'connection-status offline';
-                text.textContent = 'Desconectado';
+                dot.className = 'w-2 h-2 rounded-full bg-red-500 pulse-dot';
+                text.textContent = 'Offline';
+                text.className = 'text-red-400';
+                container.className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 text-sm';
             }
         }
 
         function formatUptime(seconds) {
             if (!seconds) return '--';
-
             const days = Math.floor(seconds / 86400);
             const hours = Math.floor((seconds % 86400) / 3600);
             const minutes = Math.floor((seconds % 3600) / 60);
 
-            if (days > 0) {
-                return `${days}d ${hours}h`;
-            } else if (hours > 0) {
-                return `${hours}h ${minutes}m`;
-            } else {
-                return `${minutes}m`;
-            }
+            if (days > 0) return `${days}d ${hours}h`;
+            if (hours > 0) return `${hours}h ${minutes}m`;
+            return `${minutes}m`;
         }
 
         async function refreshData() {
-            await Promise.all([
-                fetchStatus(),
-                fetchSystem(),
-            ]);
+            await Promise.all([fetchStatus(), fetchSystem()]);
         }
 
         async function restartDevice() {
-            if (!confirm('Tem certeza que deseja reiniciar o device?')) {
-                return;
-            }
-
+            if (!confirm('Tem certeza que deseja reiniciar o device?')) return;
             try {
-                const response = await fetch('/admin/restart', { method: 'POST' });
-                const data = await response.json();
+                await fetch('/admin/restart', { method: 'POST' });
                 alert('Comando de restart enviado!');
             } catch (error) {
                 console.error('Error restarting:', error);
@@ -486,14 +327,11 @@
         refreshData();
         fetchTerminalConfig();
 
-        // Auto-refresh system stats every 5 seconds (but not terminal)
+        // Auto-refresh every 5 seconds
         refreshInterval = setInterval(refreshData, 5000);
 
-        // Cleanup on page unload
         window.addEventListener('beforeunload', () => {
-            if (refreshInterval) {
-                clearInterval(refreshInterval);
-            }
+            if (refreshInterval) clearInterval(refreshInterval);
         });
     </script>
 </body>
