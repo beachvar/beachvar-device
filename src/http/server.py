@@ -51,32 +51,32 @@ class DeviceHTTPServer:
         # Health check (public - for monitoring)
         self.app.router.add_get("/health", self.handle_health)
 
-        # Manager routes (protected by Zero Trust: /manager/*)
-        self.app.router.add_get("/manager/status", self.handle_status)
-        self.app.router.add_get("/manager/cameras", self.handle_cameras)
-        self.app.router.add_post("/manager/cameras/scan", self.handle_cameras_scan)
-        self.app.router.add_get("/manager/system", self.handle_system)
-        self.app.router.add_post("/manager/restart", self.handle_restart)
+        # Admin routes (protected by Cloudflare: /admin/*)
+        self.app.router.add_get("/admin/status", self.handle_status)
+        self.app.router.add_get("/admin/cameras", self.handle_cameras)
+        self.app.router.add_post("/admin/cameras/scan", self.handle_cameras_scan)
+        self.app.router.add_get("/admin/system", self.handle_system)
+        self.app.router.add_post("/admin/restart", self.handle_restart)
 
-        # Registered cameras management (protected by Zero Trust)
-        self.app.router.add_get("/manager/registered-cameras", self.handle_registered_cameras)
-        self.app.router.add_post("/manager/registered-cameras", self.handle_create_camera)
-        self.app.router.add_delete("/manager/registered-cameras/{camera_id}", self.handle_delete_camera)
+        # Registered cameras management (protected by Cloudflare)
+        self.app.router.add_get("/admin/registered-cameras", self.handle_registered_cameras)
+        self.app.router.add_post("/admin/registered-cameras", self.handle_create_camera)
+        self.app.router.add_delete("/admin/registered-cameras/{camera_id}", self.handle_delete_camera)
 
-        # Stream management (protected by Zero Trust)
-        self.app.router.add_get("/manager/streams", self.handle_streams_list)
-        self.app.router.add_post("/manager/streams/{camera_id}/start", self.handle_stream_start)
-        self.app.router.add_post("/manager/streams/{camera_id}/stop", self.handle_stream_stop)
-        self.app.router.add_get("/manager/streams/{camera_id}/status", self.handle_stream_status)
+        # Stream management (protected by Cloudflare)
+        self.app.router.add_get("/admin/streams", self.handle_streams_list)
+        self.app.router.add_post("/admin/streams/{camera_id}/start", self.handle_stream_start)
+        self.app.router.add_post("/admin/streams/{camera_id}/stop", self.handle_stream_stop)
+        self.app.router.add_get("/admin/streams/{camera_id}/status", self.handle_stream_status)
 
         # HLS streaming (public - security handled by Cloudflare Snippet)
         self.app.router.add_get("/hls/{camera_id}/{filename}", self.handle_hls_file)
 
-        # Static files / frontend (protected by Zero Trust: /manager/*)
-        self.app.router.add_get("/manager/", self.handle_index)
-        self.app.router.add_get("/manager", self.handle_index)
+        # Static files / frontend (protected by Cloudflare: /admin/*)
+        self.app.router.add_get("/admin/", self.handle_index)
+        self.app.router.add_get("/admin", self.handle_index)
         if STATIC_DIR.exists():
-            self.app.router.add_static("/manager/static/", path=STATIC_DIR, name="static")
+            self.app.router.add_static("/admin/static/", path=STATIC_DIR, name="static")
 
     async def start(self) -> None:
         """Start the HTTP server."""
@@ -111,15 +111,15 @@ class DeviceHTTPServer:
                     "/health",
                     "/hls/{camera_id}/{filename}",
                 ],
-                "manager": [
-                    "/manager/ (this page)",
-                    "/manager/status",
-                    "/manager/cameras",
-                    "/manager/cameras/scan",
-                    "/manager/system",
-                    "/manager/restart",
-                    "/manager/registered-cameras",
-                    "/manager/streams",
+                "admin": [
+                    "/admin/ (this page)",
+                    "/admin/status",
+                    "/admin/cameras",
+                    "/admin/cameras/scan",
+                    "/admin/system",
+                    "/admin/restart",
+                    "/admin/registered-cameras",
+                    "/admin/streams",
                 ],
             },
         })

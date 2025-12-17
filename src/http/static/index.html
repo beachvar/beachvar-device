@@ -704,7 +704,7 @@
 
         async function fetchStatus() {
             try {
-                const response = await fetch('/api/status');
+                const response = await fetch('/admin/status');
                 const data = await response.json();
 
                 updateConnectionStatus(true);
@@ -720,7 +720,7 @@
 
         async function fetchSystem() {
             try {
-                const response = await fetch('/api/system');
+                const response = await fetch('/admin/system');
                 const data = await response.json();
 
                 document.getElementById('cpu-usage').textContent = data.cpu_percent?.toFixed(1) || '--';
@@ -737,7 +737,7 @@
 
         async function fetchCameras() {
             try {
-                const response = await fetch('/api/cameras');
+                const response = await fetch('/admin/cameras');
                 const data = await response.json();
 
                 renderCameras(data.cameras || []);
@@ -823,7 +823,7 @@
             }
 
             try {
-                const response = await fetch('/api/restart', { method: 'POST' });
+                const response = await fetch('/admin/restart', { method: 'POST' });
                 const data = await response.json();
                 alert('Comando de restart enviado!');
             } catch (error) {
@@ -871,7 +871,7 @@
 
             try {
                 // Build URL with optional network parameter
-                let url = '/api/cameras/scan';
+                let url = '/admin/cameras/scan';
                 if (networkPrefix) {
                     url += `?network=${encodeURIComponent(networkPrefix)}`;
                 }
