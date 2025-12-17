@@ -303,15 +303,19 @@ class DeviceHTTPServer:
         """Proxy WebSocket connections to ttyd."""
         # Convert http:// to ws://
         ws_url = target_url.replace("http://", "ws://")
+        logger.info(f"WebSocket proxy: connecting to {ws_url}")
 
         # Create WebSocket response for client
         ws_client = web.WebSocketResponse()
         await ws_client.prepare(request)
+        logger.info("WebSocket client connection prepared")
 
         try:
             # Connect to ttyd WebSocket
             async with aiohttp.ClientSession() as session:
+                logger.info(f"Connecting to ttyd WebSocket at {ws_url}")
                 async with session.ws_connect(ws_url) as ws_server:
+                    logger.info("Connected to ttyd WebSocket successfully")
                     # Create tasks for bidirectional forwarding
                     async def forward_to_server():
                         async for msg in ws_client:
@@ -340,8 +344,10 @@ class DeviceHTTPServer:
                         return_exceptions=True,
                     )
 
+        except aiohttp.ClientError as e:
+            logger.error(f"WebSocket proxy connection error: {e}")
         except Exception as e:
-            logger.error(f"WebSocket proxy error: {e}")
+            logger.error(f"WebSocket proxy error: {e}", exc_info=True)
 
         return ws_client
 
