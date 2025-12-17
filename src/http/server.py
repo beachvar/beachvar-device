@@ -11,6 +11,7 @@ HLS Security Note:
 import asyncio
 import logging
 import os
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +20,9 @@ from aiohttp import web
 from ..streaming import StreamManager
 
 logger = logging.getLogger(__name__)
+
+# ttyd process for web terminal
+_ttyd_process: Optional[subprocess.Popen] = None
 
 # Static files directory
 STATIC_DIR = Path(__file__).parent / "static"
@@ -44,6 +48,8 @@ class DeviceHTTPServer:
         self.device_id = os.getenv("DEVICE_ID", "unknown")
         self.device_token = device_token or os.getenv("DEVICE_TOKEN", "")
         self.stream_manager = stream_manager
+        self._ttyd_port = 7682  # Port for ttyd web terminal
+        self._ttyd_process: Optional[subprocess.Popen] = None
         self._setup_routes()
 
     def _setup_routes(self) -> None:
@@ -53,10 +59,9 @@ class DeviceHTTPServer:
 
         # Admin routes (protected by Cloudflare: /admin/*)
         self.app.router.add_get("/admin/status", self.handle_status)
-        self.app.router.add_get("/admin/cameras", self.handle_cameras)
-        self.app.router.add_post("/admin/cameras/scan", self.handle_cameras_scan)
         self.app.router.add_get("/admin/system", self.handle_system)
         self.app.router.add_post("/admin/restart", self.handle_restart)
+        self.app.router.add_get("/admin/terminal-config", self.handle_terminal_config)
 
         # Registered cameras management (protected by Cloudflare)
         self.app.router.add_get("/admin/registered-cameras", self.handle_registered_cameras)
@@ -88,11 +93,72 @@ class DeviceHTTPServer:
 
         logger.info(f"HTTP server started on http://{self.host}:{self.port}")
 
+        # Start ttyd web terminal for SSH access to host
+        await self._start_ttyd()
+
     async def stop(self) -> None:
         """Stop the HTTP server."""
+        # Stop ttyd
+        await self._stop_ttyd()
+
         if self.runner:
             await self.runner.cleanup()
             logger.info("HTTP server stopped")
+
+    async def _start_ttyd(self) -> None:
+        """Start ttyd web terminal for SSH access to host."""
+        # Get host SSH config from environment
+        ssh_host = os.getenv("SSH_HOST", "host.docker.internal")
+        ssh_port = os.getenv("SSH_PORT", "22")
+        ssh_user = os.getenv("SSH_USER", "pi")
+
+        # Check if ttyd is available
+        ttyd_path = "/usr/local/bin/ttyd"
+        if not os.path.exists(ttyd_path):
+            logger.warning("ttyd not found, web terminal disabled")
+            return
+
+        try:
+            # Start ttyd with SSH to host
+            # -p: port, -W: write only (for security), -t: terminal options
+            cmd = [
+                ttyd_path,
+                "-p", str(self._ttyd_port),
+                "-t", "fontSize=14",
+                "-t", "fontFamily=monospace",
+                "-t", "theme={'background': '#1a1a2e'}",
+                "ssh",
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=/dev/null",
+                "-p", ssh_port,
+                f"{ssh_user}@{ssh_host}",
+            ]
+
+            self._ttyd_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            logger.info(f"ttyd web terminal started on port {self._ttyd_port} (SSH to {ssh_user}@{ssh_host}:{ssh_port})")
+
+        except Exception as e:
+            logger.error(f"Failed to start ttyd: {e}")
+
+    async def _stop_ttyd(self) -> None:
+        """Stop ttyd web terminal."""
+        if self._ttyd_process:
+            try:
+                self._ttyd_process.terminate()
+                self._ttyd_process.wait(timeout=5)
+                logger.info("ttyd web terminal stopped")
+            except Exception as e:
+                logger.warning(f"Error stopping ttyd: {e}")
+                try:
+                    self._ttyd_process.kill()
+                except Exception:
+                    pass
+            self._ttyd_process = None
 
     # Route handlers
 
@@ -127,6 +193,21 @@ class DeviceHTTPServer:
     async def handle_health(self, request: web.Request) -> web.Response:
         """Health check endpoint."""
         return web.json_response({"status": "ok"})
+
+    async def handle_terminal_config(self, request: web.Request) -> web.Response:
+        """Get terminal configuration for web UI."""
+        # Check if ttyd is running
+        ttyd_running = self._ttyd_process is not None and self._ttyd_process.poll() is None
+
+        ssh_host = os.getenv("SSH_HOST", "host.docker.internal")
+        ssh_user = os.getenv("SSH_USER", "pi")
+
+        return web.json_response({
+            "enabled": ttyd_running,
+            "port": self._ttyd_port,
+            "ssh_host": ssh_host,
+            "ssh_user": ssh_user,
+        })
 
     async def handle_hls_file(self, request: web.Request) -> web.Response:
         """
@@ -202,303 +283,6 @@ class DeviceHTTPServer:
             },
         })
 
-    async def handle_cameras(self, request: web.Request) -> web.Response:
-        """List available cameras."""
-        import subprocess
-
-        cameras = []
-
-        # Detect USB cameras
-        try:
-            result = subprocess.run(
-                ["v4l2-ctl", "--list-devices"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                # Parse v4l2-ctl output
-                lines = result.stdout.strip().split("\n")
-                current_name = None
-                for line in lines:
-                    if not line.startswith("\t"):
-                        current_name = line.strip().rstrip(":")
-                    elif line.strip().startswith("/dev/video"):
-                        device = line.strip()
-                        cameras.append({
-                            "id": device.replace("/dev/", ""),
-                            "name": current_name or device,
-                            "path": device,
-                            "status": "available",
-                        })
-        except Exception as e:
-            logger.warning(f"Failed to detect cameras: {e}")
-
-        return web.json_response({"cameras": cameras})
-
-    async def handle_cameras_scan(self, request: web.Request) -> web.Response:
-        """Perform detailed camera scan (network + local)."""
-        import subprocess
-        import re
-        import socket
-        import asyncio
-        from concurrent.futures import ThreadPoolExecutor
-
-        cameras = []
-        scan_log = []
-
-        scan_log.append("Iniciando varredura de cameras...")
-
-        # Get network prefix from:
-        # 1. Query parameter (?network=192.168.68)
-        # 2. Environment variable (SCAN_NETWORK)
-        # 3. Auto-detect from local IP
-        network_prefix = request.query.get("network")
-
-        if not network_prefix:
-            network_prefix = os.getenv("SCAN_NETWORK")
-
-        if not network_prefix:
-            local_ip = self._get_local_ip()
-            network_prefix = ".".join(local_ip.split(".")[:3]) if local_ip else None
-            scan_log.append(f"IP local detectado: {local_ip}")
-        else:
-            scan_log.append(f"Usando rede configurada: {network_prefix}")
-
-        # Method 1: Network scan for IP cameras
-        if network_prefix:
-            scan_log.append(f"Varrendo rede {network_prefix}.0/24...")
-
-            # Common camera ports
-            camera_ports = [
-                (554, "RTSP"),      # RTSP streaming
-                (80, "HTTP"),       # Web interface
-                (8080, "HTTP-Alt"), # Alt web interface
-                (443, "HTTPS"),     # Secure web
-                (8554, "RTSP-Alt"), # Alt RTSP
-                (37777, "Dahua"),   # Dahua cameras
-                (34567, "XMEye"),   # XMEye/Generic Chinese
-                (5000, "ONVIF"),    # ONVIF discovery
-            ]
-
-            # Scan network in parallel
-            discovered_hosts = await self._scan_network(network_prefix, camera_ports, scan_log)
-
-            for host_info in discovered_hosts:
-                ip = host_info["ip"]
-                open_ports = host_info["ports"]
-
-                # Determine camera type based on ports
-                cam_type = "IP Camera"
-                rtsp_url = None
-
-                if 554 in open_ports or 8554 in open_ports:
-                    rtsp_port = 554 if 554 in open_ports else 8554
-                    rtsp_url = f"rtsp://{ip}:{rtsp_port}/stream"
-                    cam_type = "RTSP Camera"
-                if 37777 in open_ports:
-                    cam_type = "Dahua Camera"
-                    rtsp_url = f"rtsp://{ip}:554/cam/realmonitor?channel=1&subtype=0"
-                if 34567 in open_ports:
-                    cam_type = "XMEye Camera"
-
-                # Try to get more info via HTTP
-                camera_name = await self._get_camera_name(ip, open_ports)
-
-                cam_info = {
-                    "id": f"ip-{ip.replace('.', '-')}",
-                    "name": camera_name or f"Camera {ip}",
-                    "ip": ip,
-                    "type": cam_type,
-                    "status": "available",
-                    "ports": open_ports,
-                    "rtsp_url": rtsp_url,
-                    "web_url": f"http://{ip}" if 80 in open_ports else None,
-                }
-                cameras.append(cam_info)
-                scan_log.append(f"Encontrada: {cam_info['name']} ({ip}) - {cam_type}")
-
-        # Method 2: v4l2-ctl (Linux Video4Linux) for local USB cameras
-        scan_log.append("Verificando dispositivos V4L2 locais...")
-        try:
-            result = subprocess.run(
-                ["v4l2-ctl", "--list-devices"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                lines = result.stdout.strip().split("\n")
-                current_name = None
-                for line in lines:
-                    if not line.startswith("\t"):
-                        current_name = line.strip().rstrip(":")
-                    elif line.strip().startswith("/dev/video"):
-                        device = line.strip()
-                        cam_info = {
-                            "id": device.replace("/dev/", ""),
-                            "name": current_name or device,
-                            "path": device,
-                            "status": "available",
-                            "type": "v4l2",
-                            "formats": [],
-                            "resolutions": [],
-                        }
-
-                        # Get supported formats
-                        try:
-                            fmt_result = subprocess.run(
-                                ["v4l2-ctl", "-d", device, "--list-formats-ext"],
-                                capture_output=True,
-                                text=True,
-                                timeout=5,
-                            )
-                            if fmt_result.returncode == 0:
-                                # Parse formats
-                                format_matches = re.findall(
-                                    r"Pixel Format: '(\w+)'",
-                                    fmt_result.stdout
-                                )
-                                cam_info["formats"] = list(set(format_matches))
-
-                                # Parse resolutions
-                                res_matches = re.findall(
-                                    r"Size: Discrete (\d+x\d+)",
-                                    fmt_result.stdout
-                                )
-                                cam_info["resolutions"] = list(set(res_matches))
-                        except Exception:
-                            pass
-
-                        # Get device capabilities
-                        try:
-                            cap_result = subprocess.run(
-                                ["v4l2-ctl", "-d", device, "--all"],
-                                capture_output=True,
-                                text=True,
-                                timeout=5,
-                            )
-                            if cap_result.returncode == 0:
-                                # Check if it's a capture device
-                                if "Video Capture" in cap_result.stdout:
-                                    cam_info["capabilities"] = ["capture"]
-                                if "Video Output" in cap_result.stdout:
-                                    cam_info.setdefault("capabilities", []).append("output")
-
-                                # Get driver info
-                                driver_match = re.search(
-                                    r"Driver name\s*:\s*(\S+)",
-                                    cap_result.stdout
-                                )
-                                if driver_match:
-                                    cam_info["driver"] = driver_match.group(1)
-
-                                # Get card info
-                                card_match = re.search(
-                                    r"Card type\s*:\s*(.+)",
-                                    cap_result.stdout
-                                )
-                                if card_match:
-                                    cam_info["card"] = card_match.group(1).strip()
-
-                                # Get bus info
-                                bus_match = re.search(
-                                    r"Bus info\s*:\s*(.+)",
-                                    cap_result.stdout
-                                )
-                                if bus_match:
-                                    cam_info["bus"] = bus_match.group(1).strip()
-                        except Exception:
-                            pass
-
-                        cameras.append(cam_info)
-                        scan_log.append(f"Encontrada: {cam_info['name']} ({device})")
-            else:
-                scan_log.append("v4l2-ctl nao encontrou dispositivos")
-        except FileNotFoundError:
-            scan_log.append("v4l2-ctl nao instalado")
-        except subprocess.TimeoutExpired:
-            scan_log.append("v4l2-ctl timeout")
-        except Exception as e:
-            scan_log.append(f"Erro v4l2-ctl: {str(e)}")
-
-        # Method 2: Check /dev/video* directly
-        scan_log.append("Verificando /dev/video*...")
-        try:
-            video_devices = list(Path("/dev").glob("video*"))
-            for dev_path in video_devices:
-                device = str(dev_path)
-                # Check if already found
-                if not any(c["path"] == device for c in cameras):
-                    cameras.append({
-                        "id": dev_path.name,
-                        "name": f"Video Device ({dev_path.name})",
-                        "path": device,
-                        "status": "available",
-                        "type": "unknown",
-                    })
-                    scan_log.append(f"Encontrado dispositivo: {device}")
-        except Exception as e:
-            scan_log.append(f"Erro ao verificar /dev: {str(e)}")
-
-        # Method 3: USB devices (lsusb)
-        scan_log.append("Verificando dispositivos USB...")
-        usb_cameras = []
-        try:
-            result = subprocess.run(
-                ["lsusb"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                for line in result.stdout.strip().split("\n"):
-                    line_lower = line.lower()
-                    if any(kw in line_lower for kw in ["camera", "webcam", "video", "cam"]):
-                        # Parse lsusb output: Bus XXX Device YYY: ID XXXX:YYYY Name
-                        match = re.search(
-                            r"Bus (\d+) Device (\d+): ID ([0-9a-f:]+) (.+)",
-                            line,
-                            re.IGNORECASE
-                        )
-                        if match:
-                            usb_cameras.append({
-                                "bus": match.group(1),
-                                "device": match.group(2),
-                                "usb_id": match.group(3),
-                                "name": match.group(4).strip(),
-                            })
-                            scan_log.append(f"USB Camera: {match.group(4).strip()}")
-        except FileNotFoundError:
-            scan_log.append("lsusb nao instalado")
-        except Exception as e:
-            scan_log.append(f"Erro lsusb: {str(e)}")
-
-        # Filter out metadata devices (usually odd-numbered)
-        # On Linux, video0 is capture, video1 is metadata
-        capture_cameras = []
-        for cam in cameras:
-            path = cam.get("path", "")
-            if "video" in path:
-                try:
-                    num = int(re.search(r"video(\d+)", path).group(1))
-                    # Keep only even-numbered or check capabilities
-                    caps = cam.get("capabilities", [])
-                    if "capture" in caps or num % 2 == 0:
-                        capture_cameras.append(cam)
-                except Exception:
-                    capture_cameras.append(cam)
-            else:
-                capture_cameras.append(cam)
-
-        scan_log.append(f"Varredura concluida: {len(capture_cameras)} camera(s) encontrada(s)")
-
-        return web.json_response({
-            "cameras": capture_cameras,
-            "usb_devices": usb_cameras,
-            "scan_log": scan_log,
-            "total_found": len(capture_cameras),
-        })
 
     async def handle_system(self, request: web.Request) -> web.Response:
         """System information endpoint."""
@@ -557,115 +341,7 @@ class DeviceHTTPServer:
     async def _delayed_restart(self) -> None:
         """Restart the device after a delay."""
         await asyncio.sleep(5)
-        import subprocess
         subprocess.run(["sudo", "reboot"])
-
-    def _get_local_ip(self) -> str | None:
-        """Get local IP address."""
-        import socket
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return None
-
-    async def _scan_network(
-        self,
-        network_prefix: str,
-        camera_ports: list[tuple[int, str]],
-        scan_log: list[str],
-    ) -> list[dict]:
-        """Scan network for IP cameras."""
-        import socket
-        import asyncio
-
-        discovered = []
-        port_numbers = [p[0] for p in camera_ports]
-
-        async def check_host(ip: str) -> dict | None:
-            """Check if host has any camera ports open."""
-            open_ports = []
-            for port in port_numbers:
-                try:
-                    reader, writer = await asyncio.wait_for(
-                        asyncio.open_connection(ip, port),
-                        timeout=0.5
-                    )
-                    writer.close()
-                    await writer.wait_closed()
-                    open_ports.append(port)
-                except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
-                    pass
-
-            if open_ports:
-                return {"ip": ip, "ports": open_ports}
-            return None
-
-        # Scan all IPs in parallel (1-254)
-        tasks = [check_host(f"{network_prefix}.{i}") for i in range(1, 255)]
-
-        # Process in batches to avoid too many connections
-        batch_size = 50
-        for i in range(0, len(tasks), batch_size):
-            batch = tasks[i:i + batch_size]
-            results = await asyncio.gather(*batch, return_exceptions=True)
-            for result in results:
-                if result and isinstance(result, dict):
-                    discovered.append(result)
-
-        scan_log.append(f"Encontrados {len(discovered)} hosts com portas de camera")
-        return discovered
-
-    async def _get_camera_name(self, ip: str, open_ports: list[int]) -> str | None:
-        """Try to get camera name via HTTP."""
-        import aiohttp
-
-        if 80 not in open_ports and 8080 not in open_ports:
-            return None
-
-        port = 80 if 80 in open_ports else 8080
-
-        try:
-            async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=2)
-            ) as session:
-                # Try common endpoints
-                endpoints = [
-                    f"http://{ip}:{port}/",
-                    f"http://{ip}:{port}/cgi-bin/magicBox.cgi?action=getDeviceType",
-                ]
-                for url in endpoints:
-                    try:
-                        async with session.get(url) as resp:
-                            if resp.status == 200:
-                                text = await resp.text()
-                                # Try to extract name from response
-                                if "deviceType" in text:
-                                    # Dahua format
-                                    import re
-                                    match = re.search(r"deviceType=(.+)", text)
-                                    if match:
-                                        return match.group(1).strip()
-                                # Check title tag
-                                import re
-                                title_match = re.search(
-                                    r"<title>([^<]+)</title>",
-                                    text,
-                                    re.IGNORECASE
-                                )
-                                if title_match:
-                                    title = title_match.group(1).strip()
-                                    if title and len(title) < 50:
-                                        return title
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        return None
 
     # ==================== Registered Cameras Handlers ====================
 

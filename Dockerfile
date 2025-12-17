@@ -12,9 +12,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     usbutils \
     ffmpeg \
     tzdata \
+    openssh-client \
+    sshpass \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
+
+# Install ttyd (web terminal) - detect architecture
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then \
+        TTYD_ARCH="aarch64"; \
+    elif [ "$ARCH" = "armhf" ] || [ "$ARCH" = "arm" ]; then \
+        TTYD_ARCH="armhf"; \
+    else \
+        TTYD_ARCH="x86_64"; \
+    fi && \
+    curl -L "https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.${TTYD_ARCH}" \
+    -o /usr/local/bin/ttyd && chmod +x /usr/local/bin/ttyd
 
 # Install cloudflared (optional, for tunnel support)
 # Detect architecture and download appropriate binary

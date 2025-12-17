@@ -6,11 +6,12 @@ Handles communication with backend API and FFmpeg processes.
 import asyncio
 import logging
 import re
+import socket
 import subprocess
 import time
 from dataclasses import dataclass, field
 from typing import Optional, Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import aiohttp
 
@@ -427,6 +428,51 @@ class StreamManager:
 
     # ==================== FFmpeg Management ====================
 
+    def _check_rtsp_connectivity(self, rtsp_url: str, timeout: float = 5.0) -> bool:
+        """
+        Check if RTSP camera is reachable via TCP connection.
+
+        This is a quick check to avoid starting FFmpeg if the camera is offline.
+        Does NOT validate RTSP stream, just TCP connectivity.
+
+        Args:
+            rtsp_url: RTSP URL (rtsp://user:pass@host:port/path)
+            timeout: Connection timeout in seconds
+
+        Returns:
+            True if camera is reachable, False otherwise
+        """
+        try:
+            parsed = urlparse(rtsp_url)
+            host = parsed.hostname
+            port = parsed.port or 554  # Default RTSP port
+
+            if not host:
+                logger.warning(f"Could not parse host from RTSP URL")
+                return False
+
+            # Try TCP connection
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex((host, port))
+            sock.close()
+
+            if result == 0:
+                return True
+            else:
+                logger.debug(f"RTSP camera at {host}:{port} not reachable (error code: {result})")
+                return False
+
+        except socket.timeout:
+            logger.debug(f"RTSP camera connection timed out")
+            return False
+        except socket.gaierror as e:
+            logger.debug(f"RTSP camera DNS resolution failed: {e}")
+            return False
+        except Exception as e:
+            logger.debug(f"RTSP connectivity check failed: {e}")
+            return False
+
     def _encode_rtsp_url(self, rtsp_url: str) -> str:
         """
         URL encode password in RTSP URL to handle special characters.
@@ -720,9 +766,22 @@ class StreamManager:
 
     async def _monitor_streams(self) -> None:
         """Monitor active streams and handle failures with auto-restart."""
-        # Track retry counts for each camera
+        # Track retry counts and last attempt time for each camera
         retry_counts: dict[str, int] = {}
-        max_retries = 10  # More retries before giving up
+        last_retry_time: dict[str, float] = {}  # Track when last retry started
+        pending_restarts: set[str] = set()  # Track cameras with pending restart tasks
+
+        # Configuration - INFINITE retries with extended backoff for overnight recovery
+        # Phase 1: Quick retries (first 10 attempts) - for transient failures
+        quick_retry_max = 10
+        quick_retry_base_delay = 3  # 3s, 5s, 7s... max 30s
+
+        # Phase 2: Extended retries (after 10 attempts) - for camera reboots
+        extended_retry_delay = 60  # 1 minute between attempts
+
+        # Phase 3: Long-term recovery (after 30+ attempts)
+        long_term_retry_delay = 300  # 5 minutes between attempts
+
         health_check_interval = 30  # Full health check every 30 seconds
         stable_stream_threshold = 120  # Reset retries after 2 minutes of stable stream
         url_refresh_interval = 6 * 3600  # Refresh HLS URLs every 6 hours (half of 12h expiry)
@@ -733,7 +792,7 @@ class StreamManager:
 
         while self._running:
             try:
-                await asyncio.sleep(1)  # Check every 1 second like stream.py for fast detection
+                await asyncio.sleep(1)  # Check every 1 second for fast detection
 
                 # Monitor existing streams for failures
                 for camera_id, stream in list(self._streams.items()):
@@ -774,26 +833,41 @@ class StreamManager:
                         if self.on_stream_status_change:
                             self.on_stream_status_change(camera_id, "error")
 
-                        # Auto-restart with progressive backoff (like stream.py)
-                        # Backoff: 3s, 5s, 7s, 9s... max 30s
+                        # Skip if restart already pending
+                        if camera_id in pending_restarts:
+                            logger.debug(f"Restart already pending for {camera_name}, skipping")
+                            continue
+
+                        # INFINITE retry with progressive backoff
                         retry_count = retry_counts.get(camera_id, 0)
-                        if retry_count < max_retries:
-                            retry_counts[camera_id] = retry_count + 1
-                            delay = min(3 + (retry_count * 2), 30)  # Progressive backoff, max 30s
-                            logger.info(
-                                f"Will restart stream for {camera_name} in {delay}s "
-                                f"(attempt {retry_count + 1}/{max_retries})"
-                            )
-                            asyncio.create_task(
-                                self._delayed_restart(camera_id, delay)
-                            )
+                        retry_counts[camera_id] = retry_count + 1
+
+                        # Determine delay based on retry phase
+                        if retry_count < quick_retry_max:
+                            # Phase 1: Quick retries with short backoff
+                            delay = min(quick_retry_base_delay + (retry_count * 2), 30)
+                            phase = "quick"
+                        elif retry_count < 30:
+                            # Phase 2: Extended retries (camera reboot scenario)
+                            delay = extended_retry_delay
+                            phase = "extended"
                         else:
-                            logger.error(
-                                f"Max retries ({max_retries}) reached for {camera_name}, "
-                                "will retry on next health check"
+                            # Phase 3: Long-term recovery
+                            delay = long_term_retry_delay
+                            phase = "long-term"
+
+                        logger.info(
+                            f"Will restart stream for {camera_name} in {delay}s "
+                            f"(attempt {retry_count + 1}, {phase} phase)"
+                        )
+
+                        pending_restarts.add(camera_id)
+                        last_retry_time[camera_id] = time.time()
+                        asyncio.create_task(
+                            self._delayed_restart_with_check(
+                                camera_id, delay, pending_restarts, retry_counts
                             )
-                            # Reset retry count so health check can try again
-                            retry_counts[camera_id] = 0
+                        )
 
                 # Reset retry counts for cameras that have been running stably
                 for camera_id, stream in list(self._streams.items()):
@@ -923,8 +997,65 @@ class StreamManager:
             logger.error(f"Error refreshing HLS URL for {camera_name}: {e}")
             return False
 
+    async def _delayed_restart_with_check(
+        self,
+        camera_id: str,
+        delay: float,
+        pending_restarts: set[str],
+        retry_counts: dict[str, int],
+    ) -> None:
+        """
+        Restart a stream after a delay, with RTSP connectivity check.
+
+        This is the enhanced version that:
+        1. Checks RTSP connectivity before starting FFmpeg
+        2. Removes from pending_restarts when done
+        3. Tracks retry counts properly
+        """
+        try:
+            await asyncio.sleep(delay)
+
+            if not self._running:
+                return
+
+            # Check if stream is already running (may have been restarted by health check)
+            if camera_id in self._streams and self._streams[camera_id].is_running:
+                logger.debug(f"Stream for camera {camera_id} is already running, skipping delayed restart")
+                retry_counts.pop(camera_id, None)  # Reset on success
+                return
+
+            # Refresh camera config in case it changed
+            camera = await self.get_camera(camera_id)
+            if not camera or not camera.has_stream:
+                logger.warning(f"Camera {camera_id} no longer has stream configured, skipping restart")
+                retry_counts.pop(camera_id, None)
+                return
+
+            camera_name = camera.name
+
+            # Check RTSP connectivity before starting FFmpeg
+            # This avoids wasting FFmpeg process starts when camera is unreachable
+            if not self._check_rtsp_connectivity(camera.rtsp_url):
+                logger.warning(f"Camera {camera_name} not reachable, will retry later")
+                # Stream will be retried by monitor loop or health check
+                return
+
+            logger.info(f"Auto-restarting stream for {camera_name} (RTSP reachable)")
+            result = await self.start_stream(camera_id)
+
+            if result:
+                logger.info(f"Successfully restarted stream for {camera_name}")
+                retry_counts.pop(camera_id, None)  # Reset on success
+            else:
+                logger.error(f"Failed to restart stream for {camera_name}")
+                # retry_counts already incremented, monitor loop will schedule next retry
+
+        finally:
+            # Always remove from pending to allow new restart attempts
+            pending_restarts.discard(camera_id)
+
     async def _delayed_restart(self, camera_id: str, delay: float) -> None:
-        """Restart a stream after a delay."""
+        """Restart a stream after a delay (legacy method, kept for compatibility)."""
         await asyncio.sleep(delay)
 
         if not self._running:
