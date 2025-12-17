@@ -396,8 +396,11 @@
 
                     container.innerHTML = `
                         <div class="terminal-container">
-                            <iframe src="${ttydUrl}" title="Terminal SSH"></iframe>
+                            <iframe src="${ttydUrl}" title="Terminal SSH" allow="clipboard-read; clipboard-write"></iframe>
                         </div>
+                        <p style="font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-top: 8px; text-align: center;">
+                            Clique dentro do terminal para digitar
+                        </p>
                     `;
                     info.textContent = `Conectado: ${data.ssh_user}@${data.ssh_host}`;
                 } else {

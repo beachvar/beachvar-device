@@ -323,24 +323,44 @@ class DeviceHTTPServer:
                     logger.info(f"Connected to ttyd WebSocket successfully, protocol: {ws_server.protocol}")
                     # Create tasks for bidirectional forwarding
                     async def forward_to_server():
-                        async for msg in ws_client:
-                            if msg.type == aiohttp.WSMsgType.TEXT:
-                                await ws_server.send_str(msg.data)
-                            elif msg.type == aiohttp.WSMsgType.BINARY:
-                                await ws_server.send_bytes(msg.data)
-                            elif msg.type == aiohttp.WSMsgType.CLOSE:
-                                await ws_server.close()
-                                break
+                        try:
+                            logger.info("Starting client->server forwarding loop")
+                            async for msg in ws_client:
+                                logger.info(f"Client->Server: type={msg.type}, data_len={len(msg.data) if hasattr(msg, 'data') and msg.data else 0}")
+                                if msg.type == aiohttp.WSMsgType.TEXT:
+                                    await ws_server.send_str(msg.data)
+                                elif msg.type == aiohttp.WSMsgType.BINARY:
+                                    await ws_server.send_bytes(msg.data)
+                                elif msg.type == aiohttp.WSMsgType.CLOSE:
+                                    logger.info("Client closed WebSocket")
+                                    await ws_server.close()
+                                    break
+                                elif msg.type == aiohttp.WSMsgType.ERROR:
+                                    logger.error(f"Client WebSocket error: {ws_client.exception()}")
+                                    break
+                            logger.info("Client->server forwarding loop ended")
+                        except Exception as e:
+                            logger.error(f"Error forwarding to server: {e}", exc_info=True)
 
                     async def forward_to_client():
-                        async for msg in ws_server:
-                            if msg.type == aiohttp.WSMsgType.TEXT:
-                                await ws_client.send_str(msg.data)
-                            elif msg.type == aiohttp.WSMsgType.BINARY:
-                                await ws_client.send_bytes(msg.data)
-                            elif msg.type == aiohttp.WSMsgType.CLOSE:
-                                await ws_client.close()
-                                break
+                        try:
+                            logger.info("Starting server->client forwarding loop")
+                            async for msg in ws_server:
+                                logger.info(f"Server->Client: type={msg.type}, data_len={len(msg.data) if hasattr(msg, 'data') and msg.data else 0}")
+                                if msg.type == aiohttp.WSMsgType.TEXT:
+                                    await ws_client.send_str(msg.data)
+                                elif msg.type == aiohttp.WSMsgType.BINARY:
+                                    await ws_client.send_bytes(msg.data)
+                                elif msg.type == aiohttp.WSMsgType.CLOSE:
+                                    logger.info("Server closed WebSocket")
+                                    await ws_client.close()
+                                    break
+                                elif msg.type == aiohttp.WSMsgType.ERROR:
+                                    logger.error(f"Server WebSocket error: {ws_server.exception()}")
+                                    break
+                            logger.info("Server->client forwarding loop ended")
+                        except Exception as e:
+                            logger.error(f"Error forwarding to client: {e}", exc_info=True)
 
                     # Run both directions concurrently
                     await asyncio.gather(
