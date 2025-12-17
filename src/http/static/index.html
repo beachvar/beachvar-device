@@ -391,20 +391,18 @@
                 const info = document.getElementById('terminal-info');
 
                 if (data.enabled) {
-                    // Use /terminal/ path - routed directly to ttyd by cloudflared
+                    // Use /terminal/ path - routed through cloudflared ingress
                     const ttydUrl = `${window.location.origin}/terminal/`;
 
                     container.innerHTML = `
-                        <div class="terminal-launch">
-                            <div class="terminal-icon">💻</div>
-                            <p>Terminal SSH disponivel</p>
-                            <p class="terminal-host">${data.ssh_user}@${data.ssh_host}</p>
-                            <a href="${ttydUrl}" target="_blank" class="btn btn-primary" style="margin-top: 16px;">
-                                Abrir Terminal
-                            </a>
+                        <div class="terminal-container">
+                            <iframe src="${ttydUrl}" title="Terminal SSH" allow="clipboard-read; clipboard-write"></iframe>
                         </div>
+                        <p style="font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-top: 8px; text-align: center;">
+                            Clique dentro do terminal para digitar
+                        </p>
                     `;
-                    info.textContent = '';
+                    info.textContent = `Conectado: ${data.ssh_user}@${data.ssh_host}`;
                 } else {
                     container.innerHTML = `
                         <div class="terminal-disabled">
