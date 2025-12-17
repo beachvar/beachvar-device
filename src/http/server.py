@@ -304,64 +304,51 @@ class DeviceHTTPServer:
         """Proxy WebSocket connections to ttyd."""
         # Convert http:// to ws://
         ws_url = target_url.replace("http://", "ws://")
-        logger.info(f"WebSocket proxy: connecting to {ws_url}")
 
         # Get WebSocket subprotocols from client request (ttyd uses 'tty')
         protocols = request.headers.get("Sec-WebSocket-Protocol", "").split(",")
         protocols = [p.strip() for p in protocols if p.strip()]
-        logger.info(f"Client requested protocols: {protocols}")
 
         # Create WebSocket response for client with the same protocols
         ws_client = web.WebSocketResponse(protocols=tuple(protocols) if protocols else None)
         await ws_client.prepare(request)
-        logger.info(f"WebSocket client connection prepared with protocol: {ws_client.ws_protocol}")
 
         try:
             # Connect to ttyd WebSocket with same protocols
             async with aiohttp.ClientSession() as session:
-                logger.info(f"Connecting to ttyd WebSocket at {ws_url}")
                 async with session.ws_connect(ws_url, protocols=protocols if protocols else None) as ws_server:
-                    logger.info(f"Connected to ttyd WebSocket successfully, protocol: {ws_server.protocol}")
                     # Create tasks for bidirectional forwarding
                     async def forward_to_server():
                         try:
-                            logger.info("Starting client->server forwarding loop")
                             async for msg in ws_client:
-                                logger.info(f"Client->Server: type={msg.type}, data_len={len(msg.data) if hasattr(msg, 'data') and msg.data else 0}")
                                 if msg.type == aiohttp.WSMsgType.TEXT:
                                     await ws_server.send_str(msg.data)
                                 elif msg.type == aiohttp.WSMsgType.BINARY:
                                     await ws_server.send_bytes(msg.data)
                                 elif msg.type == aiohttp.WSMsgType.CLOSE:
-                                    logger.info("Client closed WebSocket")
                                     await ws_server.close()
                                     break
                                 elif msg.type == aiohttp.WSMsgType.ERROR:
                                     logger.error(f"Client WebSocket error: {ws_client.exception()}")
                                     break
-                            logger.info("Client->server forwarding loop ended")
                         except Exception as e:
-                            logger.error(f"Error forwarding to server: {e}", exc_info=True)
+                            logger.error(f"Error forwarding to server: {e}")
 
                     async def forward_to_client():
                         try:
-                            logger.info("Starting server->client forwarding loop")
                             async for msg in ws_server:
-                                logger.info(f"Server->Client: type={msg.type}, data_len={len(msg.data) if hasattr(msg, 'data') and msg.data else 0}")
                                 if msg.type == aiohttp.WSMsgType.TEXT:
                                     await ws_client.send_str(msg.data)
                                 elif msg.type == aiohttp.WSMsgType.BINARY:
                                     await ws_client.send_bytes(msg.data)
                                 elif msg.type == aiohttp.WSMsgType.CLOSE:
-                                    logger.info("Server closed WebSocket")
                                     await ws_client.close()
                                     break
                                 elif msg.type == aiohttp.WSMsgType.ERROR:
                                     logger.error(f"Server WebSocket error: {ws_server.exception()}")
                                     break
-                            logger.info("Server->client forwarding loop ended")
                         except Exception as e:
-                            logger.error(f"Error forwarding to client: {e}", exc_info=True)
+                            logger.error(f"Error forwarding to client: {e}")
 
                     # Run both directions concurrently
                     await asyncio.gather(
@@ -373,7 +360,7 @@ class DeviceHTTPServer:
         except aiohttp.ClientError as e:
             logger.error(f"WebSocket proxy connection error: {e}")
         except Exception as e:
-            logger.error(f"WebSocket proxy error: {e}", exc_info=True)
+            logger.error(f"WebSocket proxy error: {e}")
 
         return ws_client
 
