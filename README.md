@@ -33,8 +33,9 @@ O terminal web permite acesso SSH ao host via navegador. Para funcionar sem senh
 # Criar usuario 'device' com permissao sudo
 sudo useradd -m -s /bin/bash -G sudo device
 
-# Definir senha (sera usada apenas para sudo)
-sudo passwd device
+# Permitir sudo sem senha
+echo "device ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/device
+sudo chmod 440 /etc/sudoers.d/device
 
 # Gerar chave SSH no diretorio do usuario
 sudo -u device ssh-keygen -t ed25519 -f /home/device/.ssh/id_ed25519 -N ""
