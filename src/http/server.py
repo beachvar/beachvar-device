@@ -131,6 +131,7 @@ class DeviceHTTPServer:
             # --base-path: for cloudflared routing to /terminal/
             cmd = [
                 ttyd_path,
+                "-W",  # Enable writable mode for keyboard input
                 "-p", str(self._ttyd_port),
                 "--base-path", "/terminal",
                 "-t", "fontSize=14",
