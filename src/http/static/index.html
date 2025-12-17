@@ -391,8 +391,8 @@
                 const info = document.getElementById('terminal-info');
 
                 if (data.enabled) {
-                    // Use /terminal/ path - routed through cloudflared ingress
-                    const ttydUrl = `${window.location.origin}/terminal/`;
+                    // Use /admin/terminal/ path - proxied through Python server
+                    const ttydUrl = `${window.location.origin}/admin/terminal/`;
 
                     container.innerHTML = `
                         <div class="terminal-container">

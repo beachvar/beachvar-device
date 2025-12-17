@@ -10,8 +10,6 @@ services:
       - SSH_USER=device
       - SSH_PORT=22
       - SSH_KEY_PATH=/ssh/id_ed25519
-      # Cloudflared tunnel hostname (from .env: TUNNEL_HOSTNAME)
-      - TUNNEL_HOSTNAME=${TUNNEL_HOSTNAME:-}
     volumes:
       # Mount SSH key (will be copied with correct permissions by entrypoint)
       - /etc/beachvar/ssh_key:/ssh/id_ed25519.mount:ro
