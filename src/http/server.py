@@ -128,10 +128,11 @@ class DeviceHTTPServer:
         try:
             # Start ttyd with SSH to host
             # -p: port, -t: terminal options
-            # Note: We handle base path rewriting in the proxy, not in ttyd
+            # --base-path: for cloudflared routing to /terminal/
             cmd = [
                 ttyd_path,
                 "-p", str(self._ttyd_port),
+                "--base-path", "/terminal",
                 "-t", "fontSize=14",
                 "-t", "fontFamily=monospace",
                 "-t", "theme={'background': '#1a1a2e'}",
