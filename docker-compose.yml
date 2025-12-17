@@ -7,8 +7,12 @@ services:
     environment:
       # SSH config for web terminal (access to host)
       - SSH_HOST=localhost
-      - SSH_USER=pi
+      - SSH_USER=device
       - SSH_PORT=22
+      - SSH_KEY_PATH=/ssh/id_ed25519
+    volumes:
+      # Mount SSH key for passwordless authentication to host
+      - /home/device/.ssh/id_ed25519:/ssh/id_ed25519:ro
     ports:
       - "8080:8080"   # Main HTTP server
       - "7682:7682"   # ttyd web terminal

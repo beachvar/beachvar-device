@@ -111,6 +111,7 @@ class DeviceHTTPServer:
         ssh_host = os.getenv("SSH_HOST", "host.docker.internal")
         ssh_port = os.getenv("SSH_PORT", "22")
         ssh_user = os.getenv("SSH_USER", "pi")
+        ssh_key_path = os.getenv("SSH_KEY_PATH", "")
 
         # Check if ttyd is available
         ttyd_path = "/usr/local/bin/ttyd"
@@ -120,7 +121,7 @@ class DeviceHTTPServer:
 
         try:
             # Start ttyd with SSH to host
-            # -p: port, -W: write only (for security), -t: terminal options
+            # -p: port, -t: terminal options
             cmd = [
                 ttyd_path,
                 "-p", str(self._ttyd_port),
@@ -130,9 +131,14 @@ class DeviceHTTPServer:
                 "ssh",
                 "-o", "StrictHostKeyChecking=no",
                 "-o", "UserKnownHostsFile=/dev/null",
-                "-p", ssh_port,
-                f"{ssh_user}@{ssh_host}",
             ]
+
+            # Add SSH key if configured
+            if ssh_key_path and os.path.exists(ssh_key_path):
+                cmd.extend(["-i", ssh_key_path])
+                logger.info(f"Using SSH key: {ssh_key_path}")
+
+            cmd.extend(["-p", ssh_port, f"{ssh_user}@{ssh_host}"])
 
             self._ttyd_process = subprocess.Popen(
                 cmd,
