@@ -56,8 +56,16 @@ RUN uv pip install --system -e .
 COPY src/ src/
 COPY main.py .
 
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Create SSH directory
+RUN mkdir -p /ssh
+
 # Environment variables
 ENV PYTHONUNBUFFERED=1
 
-# Run the device
+# Use entrypoint to fix SSH key permissions
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "main.py"]
