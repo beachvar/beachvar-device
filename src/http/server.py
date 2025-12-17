@@ -127,11 +127,11 @@ class DeviceHTTPServer:
 
         try:
             # Start ttyd with SSH to host
-            # -p: port, -b: base path for reverse proxy, -t: terminal options
+            # -p: port, -t: terminal options
+            # Note: We handle base path rewriting in the proxy, not in ttyd
             cmd = [
                 ttyd_path,
                 "-p", str(self._ttyd_port),
-                "-b", "/admin/terminal",  # Base path for reverse proxy
                 "-t", "fontSize=14",
                 "-t", "fontFamily=monospace",
                 "-t", "theme={'background': '#1a1a2e'}",
@@ -225,16 +225,17 @@ class DeviceHTTPServer:
     async def handle_terminal_proxy(self, request: web.Request) -> web.StreamResponse:
         """Proxy requests to ttyd web terminal."""
         # Get the path after /admin/terminal
+        # With --base-path, ttyd expects requests at root but generates URLs with base path
         path = request.match_info.get("path", "")
 
-        # Build the full path including base path (ttyd expects /admin/terminal/...)
-        full_path = f"/admin/terminal/{path}" if path else "/admin/terminal"
+        # Build URL - ttyd with --base-path still serves at root internally
+        url_path = f"/{path}" if path else "/"
 
         # Include query string if present
         if request.query_string:
-            full_path = f"{full_path}?{request.query_string}"
+            url_path = f"{url_path}?{request.query_string}"
 
-        ttyd_url = f"http://127.0.0.1:{self._ttyd_port}{full_path}"
+        ttyd_url = f"http://127.0.0.1:{self._ttyd_port}{url_path}"
 
         # Check if this is a WebSocket upgrade request
         if request.headers.get("Upgrade", "").lower() == "websocket":
@@ -258,6 +259,24 @@ class DeviceHTTPServer:
                 ) as resp:
                     # Build response
                     body = await resp.read()
+                    content_type = resp.headers.get('Content-Type', '')
+
+                    # Rewrite URLs in HTML/JS responses to use /admin/terminal/ base path
+                    if 'text/html' in content_type or 'javascript' in content_type:
+                        try:
+                            text = body.decode('utf-8')
+                            # Rewrite absolute paths to include base path
+                            # ttyd uses paths like /ws, /token, etc.
+                            text = text.replace('"/ws"', '"/admin/terminal/ws"')
+                            text = text.replace("'/ws'", "'/admin/terminal/ws'")
+                            text = text.replace('"/token"', '"/admin/terminal/token"')
+                            text = text.replace("'/token'", "'/admin/terminal/token'")
+                            # Handle window.location based paths
+                            text = text.replace('location.pathname', '"/admin/terminal/"')
+                            body = text.encode('utf-8')
+                        except UnicodeDecodeError:
+                            pass  # Keep original body if decode fails
+
                     response = web.Response(
                         status=resp.status,
                         body=body,
@@ -265,7 +284,7 @@ class DeviceHTTPServer:
 
                     # Copy headers (except hop-by-hop)
                     hop_by_hop = {'connection', 'keep-alive', 'transfer-encoding',
-                                  'te', 'trailer', 'upgrade'}
+                                  'te', 'trailer', 'upgrade', 'content-length'}
                     for key, value in resp.headers.items():
                         if key.lower() not in hop_by_hop:
                             response.headers[key] = value
