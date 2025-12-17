@@ -43,6 +43,11 @@ sudo -u device ssh-keygen -t ed25519 -f /home/device/.ssh/id_ed25519 -N ""
 # Configurar authorized_keys para login sem senha
 sudo -u device bash -c 'cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys'
 sudo chmod 600 /home/device/.ssh/authorized_keys
+
+# Copiar chave para local acessivel pelo Docker
+sudo mkdir -p /etc/beachvar
+sudo cp /home/device/.ssh/id_ed25519 /etc/beachvar/ssh_key
+sudo chmod 644 /etc/beachvar/ssh_key
 ```
 
 ### 3. Configurar variaveis de ambiente
@@ -89,7 +94,7 @@ services:
       - SSH_KEY_PATH=/ssh/id_ed25519
     volumes:
       # Mount SSH key for passwordless authentication to host
-      - /home/device/.ssh/id_ed25519:/ssh/id_ed25519:ro
+      - /etc/beachvar/ssh_key:/ssh/id_ed25519:ro
     ports:
       - "8080:8080"   # Main HTTP server
       - "7682:7682"   # ttyd web terminal
