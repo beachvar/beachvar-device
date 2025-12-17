@@ -261,21 +261,9 @@ class DeviceHTTPServer:
                     body = await resp.read()
                     content_type = resp.headers.get('Content-Type', '')
 
-                    # Rewrite URLs in HTML/JS responses to use /admin/terminal/ base path
-                    if 'text/html' in content_type or 'javascript' in content_type:
-                        try:
-                            text = body.decode('utf-8')
-                            # Rewrite absolute paths to include base path
-                            # ttyd uses paths like /ws, /token, etc.
-                            text = text.replace('"/ws"', '"/admin/terminal/ws"')
-                            text = text.replace("'/ws'", "'/admin/terminal/ws'")
-                            text = text.replace('"/token"', '"/admin/terminal/token"')
-                            text = text.replace("'/token'", "'/admin/terminal/token'")
-                            # Handle window.location based paths
-                            text = text.replace('location.pathname', '"/admin/terminal/"')
-                            body = text.encode('utf-8')
-                        except UnicodeDecodeError:
-                            pass  # Keep original body if decode fails
+                    # Note: ttyd uses window.location.pathname to construct WebSocket URL
+                    # So accessing /admin/terminal/ will correctly use /admin/terminal/ws
+                    # No URL rewriting needed - just proxy the requests correctly
 
                     response = web.Response(
                         status=resp.status,
