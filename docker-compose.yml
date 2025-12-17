@@ -14,8 +14,7 @@ services:
       # Mount SSH key (will be copied with correct permissions by entrypoint)
       - /etc/beachvar/ssh_key:/ssh/id_ed25519.mount:ro
     ports:
-      - "8080:8080"   # Main HTTP server
-      - "7682:7682"   # ttyd web terminal
+      - "8080:8080"   # Main HTTP server (ttyd proxied via /admin/terminal/)
     restart: unless-stopped
     # Use host network for SSH access to host machine
     network_mode: host

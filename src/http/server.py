@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+import aiohttp
 from aiohttp import web
 
 from ..streaming import StreamManager
@@ -76,6 +77,11 @@ class DeviceHTTPServer:
 
         # HLS streaming (public - security handled by Cloudflare Snippet)
         self.app.router.add_get("/hls/{camera_id}/{filename}", self.handle_hls_file)
+
+        # Terminal proxy (protected by Cloudflare: /admin/*)
+        # Proxy all /admin/terminal/* requests to ttyd
+        self.app.router.add_route("*", "/admin/terminal/{path:.*}", self.handle_terminal_proxy)
+        self.app.router.add_route("*", "/admin/terminal", self.handle_terminal_proxy)
 
         # Static files / frontend (protected by Cloudflare: /admin/*)
         self.app.router.add_get("/admin/", self.handle_index)
@@ -214,6 +220,98 @@ class DeviceHTTPServer:
             "ssh_host": ssh_host,
             "ssh_user": ssh_user,
         })
+
+    async def handle_terminal_proxy(self, request: web.Request) -> web.StreamResponse:
+        """Proxy requests to ttyd web terminal."""
+        # Get the path after /admin/terminal
+        path = request.match_info.get("path", "")
+        ttyd_url = f"http://127.0.0.1:{self._ttyd_port}/{path}"
+
+        # Check if this is a WebSocket upgrade request
+        if request.headers.get("Upgrade", "").lower() == "websocket":
+            return await self._proxy_websocket(request, ttyd_url)
+
+        # Regular HTTP proxy
+        return await self._proxy_http(request, ttyd_url)
+
+    async def _proxy_http(self, request: web.Request, target_url: str) -> web.Response:
+        """Proxy regular HTTP requests to ttyd."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Forward the request
+                async with session.request(
+                    method=request.method,
+                    url=target_url,
+                    headers={k: v for k, v in request.headers.items()
+                             if k.lower() not in ('host', 'content-length')},
+                    data=await request.read() if request.body_exists else None,
+                    allow_redirects=False,
+                ) as resp:
+                    # Build response
+                    body = await resp.read()
+                    response = web.Response(
+                        status=resp.status,
+                        body=body,
+                    )
+
+                    # Copy headers (except hop-by-hop)
+                    hop_by_hop = {'connection', 'keep-alive', 'transfer-encoding',
+                                  'te', 'trailer', 'upgrade'}
+                    for key, value in resp.headers.items():
+                        if key.lower() not in hop_by_hop:
+                            response.headers[key] = value
+
+                    return response
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Terminal proxy error: {e}")
+            return web.Response(status=502, text="Terminal not available")
+
+    async def _proxy_websocket(self, request: web.Request, target_url: str) -> web.WebSocketResponse:
+        """Proxy WebSocket connections to ttyd."""
+        # Convert http:// to ws://
+        ws_url = target_url.replace("http://", "ws://")
+
+        # Create WebSocket response for client
+        ws_client = web.WebSocketResponse()
+        await ws_client.prepare(request)
+
+        try:
+            # Connect to ttyd WebSocket
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(ws_url) as ws_server:
+                    # Create tasks for bidirectional forwarding
+                    async def forward_to_server():
+                        async for msg in ws_client:
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                await ws_server.send_str(msg.data)
+                            elif msg.type == aiohttp.WSMsgType.BINARY:
+                                await ws_server.send_bytes(msg.data)
+                            elif msg.type == aiohttp.WSMsgType.CLOSE:
+                                await ws_server.close()
+                                break
+
+                    async def forward_to_client():
+                        async for msg in ws_server:
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                await ws_client.send_str(msg.data)
+                            elif msg.type == aiohttp.WSMsgType.BINARY:
+                                await ws_client.send_bytes(msg.data)
+                            elif msg.type == aiohttp.WSMsgType.CLOSE:
+                                await ws_client.close()
+                                break
+
+                    # Run both directions concurrently
+                    await asyncio.gather(
+                        forward_to_server(),
+                        forward_to_client(),
+                        return_exceptions=True,
+                    )
+
+        except Exception as e:
+            logger.error(f"WebSocket proxy error: {e}")
+
+        return ws_client
 
     async def handle_hls_file(self, request: web.Request) -> web.Response:
         """

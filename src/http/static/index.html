@@ -391,8 +391,8 @@
                 const info = document.getElementById('terminal-info');
 
                 if (data.enabled) {
-                    // Get the current host (for ttyd connection)
-                    const ttydUrl = `${window.location.protocol}//${window.location.hostname}:${data.port}/`;
+                    // Use proxy path (same port, works through Cloudflare Tunnel)
+                    const ttydUrl = `${window.location.origin}/admin/terminal/`;
 
                     container.innerHTML = `
                         <div class="terminal-container">
