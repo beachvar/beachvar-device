@@ -127,10 +127,11 @@ class DeviceHTTPServer:
 
         try:
             # Start ttyd with SSH to host
-            # -p: port, -t: terminal options
+            # -p: port, -b: base path for reverse proxy, -t: terminal options
             cmd = [
                 ttyd_path,
                 "-p", str(self._ttyd_port),
+                "-b", "/admin/terminal",  # Base path for reverse proxy
                 "-t", "fontSize=14",
                 "-t", "fontFamily=monospace",
                 "-t", "theme={'background': '#1a1a2e'}",
@@ -225,7 +226,15 @@ class DeviceHTTPServer:
         """Proxy requests to ttyd web terminal."""
         # Get the path after /admin/terminal
         path = request.match_info.get("path", "")
-        ttyd_url = f"http://127.0.0.1:{self._ttyd_port}/{path}"
+
+        # Build the full path including base path (ttyd expects /admin/terminal/...)
+        full_path = f"/admin/terminal/{path}" if path else "/admin/terminal"
+
+        # Include query string if present
+        if request.query_string:
+            full_path = f"{full_path}?{request.query_string}"
+
+        ttyd_url = f"http://127.0.0.1:{self._ttyd_port}{full_path}"
 
         # Check if this is a WebSocket upgrade request
         if request.headers.get("Upgrade", "").lower() == "websocket":
