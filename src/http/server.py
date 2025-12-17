@@ -305,17 +305,22 @@ class DeviceHTTPServer:
         ws_url = target_url.replace("http://", "ws://")
         logger.info(f"WebSocket proxy: connecting to {ws_url}")
 
-        # Create WebSocket response for client
-        ws_client = web.WebSocketResponse()
+        # Get WebSocket subprotocols from client request (ttyd uses 'tty')
+        protocols = request.headers.get("Sec-WebSocket-Protocol", "").split(",")
+        protocols = [p.strip() for p in protocols if p.strip()]
+        logger.info(f"Client requested protocols: {protocols}")
+
+        # Create WebSocket response for client with the same protocols
+        ws_client = web.WebSocketResponse(protocols=tuple(protocols) if protocols else None)
         await ws_client.prepare(request)
-        logger.info("WebSocket client connection prepared")
+        logger.info(f"WebSocket client connection prepared with protocol: {ws_client.ws_protocol}")
 
         try:
-            # Connect to ttyd WebSocket
+            # Connect to ttyd WebSocket with same protocols
             async with aiohttp.ClientSession() as session:
                 logger.info(f"Connecting to ttyd WebSocket at {ws_url}")
-                async with session.ws_connect(ws_url) as ws_server:
-                    logger.info("Connected to ttyd WebSocket successfully")
+                async with session.ws_connect(ws_url, protocols=protocols if protocols else None) as ws_server:
+                    logger.info(f"Connected to ttyd WebSocket successfully, protocol: {ws_server.protocol}")
                     # Create tasks for bidirectional forwarding
                     async def forward_to_server():
                         async for msg in ws_client:
