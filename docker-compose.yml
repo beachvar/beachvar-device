@@ -10,12 +10,9 @@ services:
       - SSH_USER=device
       - SSH_PORT=22
       - SSH_KEY_PATH=/ssh/id_ed25519
-      # Cloudflare Tunnel config (optional - set CLOUDFLARE_TUNNEL_TOKEN in .env)
-      # TUNNEL_HOSTNAME can be customized per device
-      - TUNNEL_HOSTNAME=${TUNNEL_HOSTNAME:-devices.beachvar.cainelli.xyz}
     volumes:
       # Mount SSH key (will be copied with correct permissions by entrypoint)
       - /etc/beachvar/ssh_key:/ssh/id_ed25519.mount:ro
     restart: unless-stopped
-    # Use host network for SSH access to host machine and cloudflared tunnel
+    # Use host network for SSH access to host machine
     network_mode: host
