@@ -167,14 +167,10 @@
                             <p class="text-sm text-gray-500">Gerenciar device</p>
                         </div>
                     </div>
-                    <div class="p-5 space-y-3">
+                    <div class="p-5">
                         <button onclick="refreshData()" class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition-colors font-medium">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                             Atualizar Status
-                        </button>
-                        <button onclick="restartDevice()" class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors font-medium">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                            Reiniciar Device
                         </button>
                     </div>
                 </div>
@@ -310,17 +306,6 @@
 
         async function refreshData() {
             await Promise.all([fetchStatus(), fetchSystem()]);
-        }
-
-        async function restartDevice() {
-            if (!confirm('Tem certeza que deseja reiniciar o device?')) return;
-            try {
-                await fetch('/admin/restart', { method: 'POST' });
-                alert('Comando de restart enviado!');
-            } catch (error) {
-                console.error('Error restarting:', error);
-                alert('Erro ao reiniciar device');
-            }
         }
 
         // Initial load
