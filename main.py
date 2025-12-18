@@ -208,6 +208,64 @@ async def handle_camera_updated(params: dict) -> dict:
     }
 
 
+async def handle_start_youtube_stream(params: dict) -> dict:
+    """Handle start YouTube stream command from backend."""
+    global stream_manager
+
+    camera_id = params.get("camera_id")
+    broadcast_id = params.get("broadcast_id")
+    rtmp_url = params.get("rtmp_url")
+    stream_key = params.get("stream_key")
+
+    if not stream_manager:
+        return {"error": "Stream manager not initialized"}
+
+    if not all([camera_id, broadcast_id, rtmp_url, stream_key]):
+        return {"error": "Missing required parameters"}
+
+    logger.info(f"Starting YouTube stream for camera {camera_id}, broadcast {broadcast_id}")
+
+    result = await stream_manager.start_youtube_stream(
+        camera_id=camera_id,
+        broadcast_id=broadcast_id,
+        rtmp_url=rtmp_url,
+        stream_key=stream_key,
+    )
+
+    return {
+        "success": result,
+        "camera_id": camera_id,
+        "broadcast_id": broadcast_id,
+    }
+
+
+async def handle_stop_youtube_stream(params: dict) -> dict:
+    """Handle stop YouTube stream command from backend."""
+    global stream_manager
+
+    camera_id = params.get("camera_id")
+    broadcast_id = params.get("broadcast_id")
+
+    if not stream_manager:
+        return {"error": "Stream manager not initialized"}
+
+    if not all([camera_id, broadcast_id]):
+        return {"error": "Missing required parameters"}
+
+    logger.info(f"Stopping YouTube stream for camera {camera_id}, broadcast {broadcast_id}")
+
+    result = await stream_manager.stop_youtube_stream(
+        camera_id=camera_id,
+        broadcast_id=broadcast_id,
+    )
+
+    return {
+        "success": result,
+        "camera_id": camera_id,
+        "broadcast_id": broadcast_id,
+    }
+
+
 async def on_tunnel_config(config: dict) -> None:
     """Handle tunnel configuration from gateway."""
     global tunnel_manager, stream_manager
@@ -349,6 +407,8 @@ async def main():
     gateway_client.register_command_handler('camera_created', handle_camera_created)
     gateway_client.register_command_handler('camera_deleted', handle_camera_deleted)
     gateway_client.register_command_handler('camera_updated', handle_camera_updated)
+    gateway_client.register_command_handler('start_youtube_stream', handle_start_youtube_stream)
+    gateway_client.register_command_handler('stop_youtube_stream', handle_stop_youtube_stream)
 
     # Register tunnel config callback
     gateway_client.on_tunnel_config = on_tunnel_config
