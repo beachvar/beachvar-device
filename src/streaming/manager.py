@@ -1293,7 +1293,7 @@ class StreamManager:
             True if updated successfully
         """
         try:
-            url = f"{self.backend_url}/api/device/youtube/broadcasts/{broadcast_id}/status/"
+            url = f"{self.backend_url}/api/v1/device/youtube/broadcasts/{broadcast_id}/status/"
 
             payload = {"status": status}
             if ffmpeg_pid:
@@ -1352,7 +1352,7 @@ class StreamManager:
 
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/api/device/youtube/broadcasts/"
+                url = f"{self.backend_url}/api/v1/device/youtube/broadcasts/"
                 async with session.get(url, headers=self._get_headers()) as resp:
                     if resp.status != 200:
                         logger.warning(f"Failed to fetch active YouTube broadcasts: {resp.status}")
