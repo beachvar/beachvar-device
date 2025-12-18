@@ -1247,7 +1247,7 @@ class StreamManager:
             True if updated successfully
         """
         try:
-            url = f"{self.backend_url}/api/v1/manager/youtube/broadcasts/{broadcast_id}/status/"
+            url = f"{self.backend_url}/api/device/youtube/broadcasts/{broadcast_id}/status/"
 
             payload = {"status": status}
             if ffmpeg_pid:
