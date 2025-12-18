@@ -279,7 +279,7 @@ async def main():
     gateway_url = os.getenv('GATEWAY_URL')
     device_id = os.getenv('DEVICE_ID')
     device_token = os.getenv('DEVICE_TOKEN')
-    token_file = os.getenv('TOKEN_FILE')
+    token_file = os.getenv('TOKEN_FILE', '.tokens')
     http_port = int(os.getenv('HTTP_PORT', '8080'))
     backend_url = os.getenv('BACKEND_URL')
 
