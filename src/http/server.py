@@ -11,19 +11,14 @@ HLS Security Note:
 import asyncio
 import logging
 import os
-import subprocess
 from pathlib import Path
 from typing import Optional
 
-import aiohttp
 from aiohttp import web
 
 from ..streaming import StreamManager
 
 logger = logging.getLogger(__name__)
-
-# ttyd process for web terminal
-_ttyd_process: Optional[subprocess.Popen] = None
 
 # Static files directory
 STATIC_DIR = Path(__file__).parent / "static"
@@ -49,8 +44,6 @@ class DeviceHTTPServer:
         self.device_id = os.getenv("DEVICE_ID", "unknown")
         self.device_token = device_token or os.getenv("DEVICE_TOKEN", "")
         self.stream_manager = stream_manager
-        self._ttyd_port = 7682  # Port for ttyd web terminal
-        self._ttyd_process: Optional[subprocess.Popen] = None
         self._setup_routes()
 
     def _setup_routes(self) -> None:
@@ -62,7 +55,6 @@ class DeviceHTTPServer:
         self.app.router.add_get("/admin/status", self.handle_status)
         self.app.router.add_get("/admin/system", self.handle_system)
         self.app.router.add_post("/admin/restart", self.handle_restart)
-        self.app.router.add_get("/admin/terminal-config", self.handle_terminal_config)
 
         # Registered cameras management (protected by Cloudflare)
         self.app.router.add_get("/admin/registered-cameras", self.handle_registered_cameras)
@@ -77,11 +69,6 @@ class DeviceHTTPServer:
 
         # HLS streaming (public - security handled by Cloudflare Snippet)
         self.app.router.add_get("/hls/{camera_id}/{filename}", self.handle_hls_file)
-
-        # Terminal proxy (protected by Cloudflare: /admin/*)
-        # Proxy all /admin/terminal/* requests to ttyd
-        self.app.router.add_route("*", "/admin/terminal/{path:.*}", self.handle_terminal_proxy)
-        self.app.router.add_route("*", "/admin/terminal", self.handle_terminal_proxy)
 
         # Static files / frontend (protected by Cloudflare: /admin/*)
         self.app.router.add_get("/admin/", self.handle_index)
@@ -99,90 +86,11 @@ class DeviceHTTPServer:
 
         logger.info(f"HTTP server started on http://{self.host}:{self.port}")
 
-        # Start ttyd web terminal for SSH access to host
-        await self._start_ttyd()
-
     async def stop(self) -> None:
         """Stop the HTTP server."""
-        # Stop ttyd
-        await self._stop_ttyd()
-
         if self.runner:
             await self.runner.cleanup()
             logger.info("HTTP server stopped")
-
-    async def _start_ttyd(self) -> None:
-        """Start ttyd web terminal for SSH access to host."""
-        # Get host SSH config from environment
-        ssh_host = os.getenv("SSH_HOST", "host.docker.internal")
-        ssh_port = os.getenv("SSH_PORT", "22")
-        ssh_user = os.getenv("SSH_USER", "pi")
-        ssh_key_path = os.getenv("SSH_KEY_PATH", "")
-
-        # Check if ttyd is available
-        ttyd_path = "/usr/local/bin/ttyd"
-        if not os.path.exists(ttyd_path):
-            logger.warning("ttyd not found, web terminal disabled")
-            return
-
-        try:
-            # Start ttyd with SSH to host
-            # -p: port, -t: terminal options
-            # ttyd runs at root, Python proxy handles /admin/terminal/* routing
-            cmd = [
-                ttyd_path,
-                "-W",  # Enable writable mode for keyboard input
-                "-p", str(self._ttyd_port),
-                "-t", "fontSize=14",
-                "-t", "fontFamily=monospace",
-                "-t", "theme={'background': '#1a1a2e'}",
-                "ssh",
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "UserKnownHostsFile=/dev/null",
-            ]
-
-            # Add SSH key if configured
-            if ssh_key_path and os.path.exists(ssh_key_path):
-                cmd.extend(["-i", ssh_key_path])
-                logger.info(f"Using SSH key: {ssh_key_path}")
-
-            cmd.extend(["-p", ssh_port, f"{ssh_user}@{ssh_host}"])
-
-            logger.info(f"Starting ttyd with command: {' '.join(cmd)}")
-
-            self._ttyd_process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-
-            # Give ttyd a moment to start and check if it's running
-            await asyncio.sleep(0.5)
-            if self._ttyd_process.poll() is not None:
-                stdout, stderr = self._ttyd_process.communicate()
-                logger.error(f"ttyd failed to start. stdout: {stdout.decode()}, stderr: {stderr.decode()}")
-                self._ttyd_process = None
-                return
-
-            logger.info(f"ttyd web terminal started on port {self._ttyd_port} (SSH to {ssh_user}@{ssh_host}:{ssh_port})")
-
-        except Exception as e:
-            logger.error(f"Failed to start ttyd: {e}")
-
-    async def _stop_ttyd(self) -> None:
-        """Stop ttyd web terminal."""
-        if self._ttyd_process:
-            try:
-                self._ttyd_process.terminate()
-                self._ttyd_process.wait(timeout=5)
-                logger.info("ttyd web terminal stopped")
-            except Exception as e:
-                logger.warning(f"Error stopping ttyd: {e}")
-                try:
-                    self._ttyd_process.kill()
-                except Exception:
-                    pass
-            self._ttyd_process = None
 
     # Route handlers
 
@@ -204,8 +112,6 @@ class DeviceHTTPServer:
                 "admin": [
                     "/admin/ (this page)",
                     "/admin/status",
-                    "/admin/cameras",
-                    "/admin/cameras/scan",
                     "/admin/system",
                     "/admin/restart",
                     "/admin/registered-cameras",
@@ -217,152 +123,6 @@ class DeviceHTTPServer:
     async def handle_health(self, request: web.Request) -> web.Response:
         """Health check endpoint."""
         return web.json_response({"status": "ok"})
-
-    async def handle_terminal_config(self, request: web.Request) -> web.Response:
-        """Get terminal configuration for web UI."""
-        # Check if ttyd is running
-        ttyd_running = self._ttyd_process is not None and self._ttyd_process.poll() is None
-
-        ssh_host = os.getenv("SSH_HOST", "host.docker.internal")
-        ssh_user = os.getenv("SSH_USER", "pi")
-
-        return web.json_response({
-            "enabled": ttyd_running,
-            "port": self._ttyd_port,
-            "ssh_host": ssh_host,
-            "ssh_user": ssh_user,
-        })
-
-    async def handle_terminal_proxy(self, request: web.Request) -> web.StreamResponse:
-        """Proxy requests to ttyd web terminal."""
-        # Check if ttyd is running
-        if not self._ttyd_process or self._ttyd_process.poll() is not None:
-            logger.warning("ttyd process is not running")
-            return web.Response(status=503, text="Terminal not available - ttyd not running")
-
-        # Get the path after /admin/terminal
-        # ttyd uses window.location.pathname to construct URLs, so it expects to be at root
-        path = request.match_info.get("path", "")
-
-        # Build URL - proxy to ttyd at root
-        url_path = f"/{path}" if path else "/"
-
-        # Include query string if present
-        if request.query_string:
-            url_path = f"{url_path}?{request.query_string}"
-
-        ttyd_url = f"http://127.0.0.1:{self._ttyd_port}{url_path}"
-        logger.debug(f"Terminal proxy: {request.path} -> {ttyd_url}")
-
-        # Check if this is a WebSocket upgrade request
-        if request.headers.get("Upgrade", "").lower() == "websocket":
-            return await self._proxy_websocket(request, ttyd_url)
-
-        # Regular HTTP proxy
-        return await self._proxy_http(request, ttyd_url)
-
-    async def _proxy_http(self, request: web.Request, target_url: str) -> web.Response:
-        """Proxy regular HTTP requests to ttyd."""
-        try:
-            async with aiohttp.ClientSession() as session:
-                # Forward the request
-                async with session.request(
-                    method=request.method,
-                    url=target_url,
-                    headers={k: v for k, v in request.headers.items()
-                             if k.lower() not in ('host', 'content-length')},
-                    data=await request.read() if request.body_exists else None,
-                    allow_redirects=False,
-                ) as resp:
-                    # Build response
-                    body = await resp.read()
-                    content_type = resp.headers.get('Content-Type', '')
-
-                    # Note: ttyd uses window.location.pathname to construct WebSocket URL
-                    # So accessing /admin/terminal/ will correctly use /admin/terminal/ws
-                    # No URL rewriting needed - just proxy the requests correctly
-
-                    response = web.Response(
-                        status=resp.status,
-                        body=body,
-                    )
-
-                    # Copy headers (except hop-by-hop)
-                    hop_by_hop = {'connection', 'keep-alive', 'transfer-encoding',
-                                  'te', 'trailer', 'upgrade', 'content-length'}
-                    for key, value in resp.headers.items():
-                        if key.lower() not in hop_by_hop:
-                            response.headers[key] = value
-
-                    return response
-
-        except aiohttp.ClientError as e:
-            logger.error(f"Terminal proxy error: {e}")
-            return web.Response(status=502, text="Terminal not available")
-
-    async def _proxy_websocket(self, request: web.Request, target_url: str) -> web.WebSocketResponse:
-        """Proxy WebSocket connections to ttyd."""
-        # Convert http:// to ws://
-        ws_url = target_url.replace("http://", "ws://")
-
-        # Get WebSocket subprotocols from client request (ttyd uses 'tty')
-        protocols = request.headers.get("Sec-WebSocket-Protocol", "").split(",")
-        protocols = [p.strip() for p in protocols if p.strip()]
-
-        # Create WebSocket response for client with the same protocols
-        ws_client = web.WebSocketResponse(protocols=tuple(protocols) if protocols else None)
-        await ws_client.prepare(request)
-
-        try:
-            # Connect to ttyd WebSocket with same protocols
-            async with aiohttp.ClientSession() as session:
-                async with session.ws_connect(ws_url, protocols=protocols if protocols else None) as ws_server:
-                    # Create tasks for bidirectional forwarding
-                    async def forward_to_server():
-                        try:
-                            async for msg in ws_client:
-                                if msg.type == aiohttp.WSMsgType.TEXT:
-                                    await ws_server.send_str(msg.data)
-                                elif msg.type == aiohttp.WSMsgType.BINARY:
-                                    await ws_server.send_bytes(msg.data)
-                                elif msg.type == aiohttp.WSMsgType.CLOSE:
-                                    await ws_server.close()
-                                    break
-                                elif msg.type == aiohttp.WSMsgType.ERROR:
-                                    logger.error(f"Client WebSocket error: {ws_client.exception()}")
-                                    break
-                        except Exception as e:
-                            logger.error(f"Error forwarding to server: {e}")
-
-                    async def forward_to_client():
-                        try:
-                            async for msg in ws_server:
-                                if msg.type == aiohttp.WSMsgType.TEXT:
-                                    await ws_client.send_str(msg.data)
-                                elif msg.type == aiohttp.WSMsgType.BINARY:
-                                    await ws_client.send_bytes(msg.data)
-                                elif msg.type == aiohttp.WSMsgType.CLOSE:
-                                    await ws_client.close()
-                                    break
-                                elif msg.type == aiohttp.WSMsgType.ERROR:
-                                    logger.error(f"Server WebSocket error: {ws_server.exception()}")
-                                    break
-                        except Exception as e:
-                            logger.error(f"Error forwarding to client: {e}")
-
-                    # Run both directions concurrently
-                    await asyncio.gather(
-                        forward_to_server(),
-                        forward_to_client(),
-                        return_exceptions=True,
-                    )
-
-        except aiohttp.ClientError as e:
-            logger.error(f"WebSocket proxy connection error: {e}")
-        except Exception as e:
-            logger.error(f"WebSocket proxy error: {e}")
-
-        return ws_client
 
     async def handle_hls_file(self, request: web.Request) -> web.Response:
         """
@@ -495,6 +255,7 @@ class DeviceHTTPServer:
 
     async def _delayed_restart(self) -> None:
         """Restart the device after a delay."""
+        import subprocess
         await asyncio.sleep(5)
         subprocess.run(["sudo", "reboot"])
 

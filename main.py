@@ -20,7 +20,6 @@ import uvloop
 from dotenv import load_dotenv
 
 from src.gateway import GatewayClient
-from src.tunnel import TunnelManager
 from src.http import DeviceHTTPServer
 from src.streaming import StreamManager
 
@@ -36,7 +35,6 @@ logger = logging.getLogger(__name__)
 
 # Global instances for signal handling
 http_server: DeviceHTTPServer | None = None
-tunnel_manager: TunnelManager | None = None
 gateway_client: GatewayClient | None = None
 stream_manager: StreamManager | None = None
 
@@ -266,23 +264,6 @@ async def handle_stop_youtube_stream(params: dict) -> dict:
     }
 
 
-async def on_tunnel_config(config: dict) -> None:
-    """Handle tunnel configuration from gateway."""
-    global tunnel_manager, stream_manager
-
-    if tunnel_manager and config:
-        logger.info("Received tunnel configuration from gateway")
-        if tunnel_manager.configure(config):
-            await tunnel_manager.start()
-
-            # Update stream manager with public URL for HLS signing
-            if stream_manager:
-                public_url = tunnel_manager.get_public_url()
-                if public_url:
-                    stream_manager.device_public_url = public_url
-                    logger.info(f"Stream manager updated with public URL: {public_url}")
-
-
 async def auto_start_streams() -> None:
     """Auto-start streams for all registered cameras."""
     global stream_manager
@@ -331,7 +312,7 @@ async def auto_start_streams() -> None:
 
 async def main():
     """Main entry point."""
-    global http_server, tunnel_manager, gateway_client, stream_manager
+    global http_server, gateway_client, stream_manager
 
     # Get configuration from environment
     gateway_url = os.getenv('GATEWAY_URL')
@@ -393,9 +374,6 @@ async def main():
     if stream_manager:
         await stream_manager.recover_youtube_broadcasts()
 
-    # Initialize tunnel manager
-    tunnel_manager = TunnelManager(local_port=http_port)
-
     # Create gateway client
     gateway_client = GatewayClient(
         gateway_url=gateway_url,
@@ -415,9 +393,6 @@ async def main():
     gateway_client.register_command_handler('start_youtube_stream', handle_start_youtube_stream)
     gateway_client.register_command_handler('stop_youtube_stream', handle_stop_youtube_stream)
 
-    # Register tunnel config callback
-    gateway_client.on_tunnel_config = on_tunnel_config
-
     # Connect and run
     try:
         await gateway_client.connect()
@@ -427,8 +402,6 @@ async def main():
         # Cleanup
         if stream_manager:
             await stream_manager.stop()
-        if tunnel_manager:
-            await tunnel_manager.stop()
         if http_server:
             await http_server.stop()
         if gateway_client:
