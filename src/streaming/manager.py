@@ -117,9 +117,6 @@ class StreamManager:
         # Load cameras from backend
         await self.refresh_cameras()
 
-        # Recover any active YouTube broadcasts (after deploy/restart)
-        await self._recover_youtube_broadcasts()
-
         # Start monitor task
         self._monitor_task = asyncio.create_task(self._monitor_streams())
 
@@ -1346,12 +1343,17 @@ class StreamManager:
             "return_code": process.returncode if not is_running else None,
         }
 
-    async def _recover_youtube_broadcasts(self) -> None:
+    async def recover_youtube_broadcasts(self, max_retries: int = 5, retry_delay: float = 3.0) -> None:
         """
         Recover active YouTube broadcasts after device restart/deploy.
 
         Fetches broadcasts in STARTING/LIVE status from backend and attempts
-        to restart FFmpeg streaming to YouTube.
+        to restart FFmpeg streaming to YouTube. Will retry up to max_retries
+        times, waiting for HLS streams to become available.
+
+        Args:
+            max_retries: Maximum number of retry attempts per broadcast (default: 5)
+            retry_delay: Seconds to wait between retries (default: 3.0)
         """
         logger.info("Checking for active YouTube broadcasts to recover...")
 
@@ -1388,31 +1390,41 @@ class StreamManager:
                             )
                             continue
 
-                        # Check if HLS stream is running for this camera
-                        if camera_id not in self._streams or not self._streams[camera_id].is_running:
-                            logger.warning(
-                                f"Camera {camera_name} not streaming locally, cannot recover YouTube broadcast"
-                            )
+                        # Try to recover with retries (wait for HLS stream to be available)
+                        recovered = False
+                        for attempt in range(1, max_retries + 1):
+                            # Check if HLS stream is running for this camera
+                            if camera_id in self._streams and self._streams[camera_id].is_running:
+                                # Try to restart the YouTube stream
+                                logger.info(f"Recovering YouTube broadcast for {camera_name}: {broadcast_id} (attempt {attempt}/{max_retries})")
+                                success = await self.start_youtube_stream(
+                                    camera_id=camera_id,
+                                    broadcast_id=broadcast_id,
+                                    rtmp_url=rtmp_url,
+                                    stream_key=stream_key,
+                                )
+
+                                if success:
+                                    logger.info(f"Successfully recovered YouTube broadcast for {camera_name}")
+                                    recovered = True
+                                    break
+                                else:
+                                    logger.warning(f"Failed to start YouTube stream for {camera_name}, attempt {attempt}/{max_retries}")
+                            else:
+                                logger.info(f"HLS stream not ready for {camera_name}, waiting... (attempt {attempt}/{max_retries})")
+
+                            # Wait before next retry (unless it's the last attempt)
+                            if attempt < max_retries:
+                                await asyncio.sleep(retry_delay)
+
+                        # If all retries failed, mark as error
+                        if not recovered:
+                            logger.error(f"Failed to recover YouTube broadcast for {camera_name} after {max_retries} attempts")
                             await self._update_youtube_broadcast_status(
                                 broadcast_id,
                                 status="error",
-                                error_message="Camera HLS stream not running for recovery",
+                                error_message=f"Recovery failed after {max_retries} attempts - HLS stream not available",
                             )
-                            continue
-
-                        # Try to restart the YouTube stream
-                        logger.info(f"Recovering YouTube broadcast for {camera_name}: {broadcast_id}")
-                        success = await self.start_youtube_stream(
-                            camera_id=camera_id,
-                            broadcast_id=broadcast_id,
-                            rtmp_url=rtmp_url,
-                            stream_key=stream_key,
-                        )
-
-                        if success:
-                            logger.info(f"Successfully recovered YouTube broadcast for {camera_name}")
-                        else:
-                            logger.error(f"Failed to recover YouTube broadcast for {camera_name}")
 
         except Exception as e:
             logger.error(f"Error recovering YouTube broadcasts: {e}")

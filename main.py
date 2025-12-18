@@ -388,6 +388,10 @@ async def main():
     # Auto-start streams for registered cameras
     await auto_start_streams()
 
+    # Recover active YouTube broadcasts (after HLS streams are started)
+    if stream_manager:
+        await stream_manager.recover_youtube_broadcasts()
+
     # Initialize tunnel manager
     tunnel_manager = TunnelManager(local_port=http_port)
 
