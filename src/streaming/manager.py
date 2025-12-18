@@ -1184,9 +1184,14 @@ class StreamManager:
             "-live_start_index", "-1",
             "-i", hls_playlist,
 
-            # Copy video and audio (no re-encoding needed, HLS is already H.264/AAC)
+            # Copy video (no re-encoding needed)
             "-c:v", "copy",
-            "-c:a", "copy",
+
+            # Re-encode audio to fix timestamp issues and normalize for YouTube
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-ar", "44100",
+            "-af", "aresample=async=1000",  # Sync audio timestamps, fix gaps/drift
 
             # FLV output for RTMP
             "-f", "flv",
