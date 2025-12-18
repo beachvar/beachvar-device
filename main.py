@@ -372,6 +372,7 @@ async def main():
     stream_manager = StreamManager(
         backend_url=backend_url,
         device_token=device_token,
+        device_id=device_id,
     )
     await stream_manager.start()
 
