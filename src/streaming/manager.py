@@ -911,6 +911,35 @@ class StreamManager:
                         await self._update_stream_status(camera_id, "live")
                         last_stream_heartbeat[camera_id] = current_time
 
+                # Monitor YouTube streams for failures
+                for broadcast_id, process in list(self._youtube_streams.items()):
+                    if process.poll() is not None:
+                        # YouTube FFmpeg process died
+                        returncode = process.returncode
+                        stderr = ""
+                        try:
+                            stderr_bytes = process.stderr.read()
+                            stderr = stderr_bytes.decode("utf-8", errors="ignore")[-500:] if stderr_bytes else ""
+                        except Exception:
+                            pass
+
+                        error_msg = f"YouTube FFmpeg exited with code {returncode}"
+                        if stderr and stderr.strip():
+                            stderr_clean = stderr.strip().split('\n')[-1]
+                            error_msg += f": {stderr_clean}"
+
+                        logger.error(f"YouTube stream {broadcast_id} failed: {error_msg}")
+
+                        # Notify backend
+                        await self._update_youtube_broadcast_status(
+                            broadcast_id,
+                            status="error",
+                            error_message=error_msg,
+                        )
+
+                        # Remove from active YouTube streams
+                        del self._youtube_streams[broadcast_id]
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
