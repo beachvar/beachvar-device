@@ -54,7 +54,7 @@ class StreamManager:
         self,
         backend_url: str,
         device_token: str,
-        device_id: Optional[str] = None,
+        device_id: str,
         device_public_url: Optional[str] = None,
         on_stream_status_change: Optional[Callable] = None,
     ):
@@ -64,7 +64,7 @@ class StreamManager:
         Args:
             backend_url: Backend API URL (e.g., https://api.beachvar.com)
             device_token: Device authentication token
-            device_id: Device UUID for Basic Auth (if not provided, uses legacy X-Device-Token)
+            device_id: Device UUID for Basic Auth
             device_public_url: Public URL for this device (e.g., https://device-id.devices.beachvar.com)
             on_stream_status_change: Callback for stream status changes
         """
@@ -107,20 +107,14 @@ class StreamManager:
         return [cam_id for cam_id, stream in self._streams.items() if stream.is_running]
 
     def _get_headers(self) -> dict:
-        """Get HTTP headers for API requests."""
-        headers = {"Content-Type": "application/json"}
-
-        if self.device_id:
-            # Use Basic Auth (preferred)
-            import base64
-            credentials = f"{self.device_id}:{self.device_token}"
-            encoded = base64.b64encode(credentials.encode()).decode()
-            headers["Authorization"] = f"Basic {encoded}"
-        else:
-            # Fallback to legacy X-Device-Token header
-            headers["X-Device-Token"] = self.device_token
-
-        return headers
+        """Get HTTP headers for API requests using Basic Auth."""
+        import base64
+        credentials = f"{self.device_id}:{self.device_token}"
+        encoded = base64.b64encode(credentials.encode()).decode()
+        return {
+            "Content-Type": "application/json",
+            "Authorization": f"Basic {encoded}",
+        }
 
     async def start(self) -> None:
         """Start the stream manager."""
