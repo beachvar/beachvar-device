@@ -142,6 +142,9 @@ class StreamManager:
 
     # ==================== Device State (Consolidated Endpoint) ====================
 
+    # Cache for last fetched state
+    _last_state: dict | None = None
+
     async def fetch_device_state(self) -> dict | None:
         """
         Fetch consolidated device state from backend.
@@ -155,6 +158,7 @@ class StreamManager:
                     if resp.status == 200:
                         data = await resp.json()
                         logger.debug(f"Device state fetched: {len(data.get('cameras', []))} cameras, {len(data.get('broadcasts', []))} broadcasts")
+                        self._last_state = data
                         return data
                     else:
                         error = await resp.text()
@@ -164,19 +168,105 @@ class StreamManager:
             logger.error(f"Error fetching device state: {e}")
             return None
 
+    async def sync_device_state(self) -> bool:
+        """
+        Sync device state from backend in a single call.
+        Updates cameras and syncs YouTube broadcasts (starts new ones, stops removed ones).
+
+        Returns:
+            True if sync was successful
+        """
+        state = await self.fetch_device_state()
+        if state is None:
+            return False
+
+        # Update cameras
+        camera_list = state.get("cameras", [])
+        cameras = [CameraConfig.from_dict(c) for c in camera_list]
+        self._cameras = {c.id: c for c in cameras}
+
+        # Sync YouTube broadcasts
+        await self._sync_youtube_broadcasts(state.get("broadcasts", []))
+
+        return True
+
+    async def _sync_youtube_broadcasts(self, backend_broadcasts: list[dict]) -> None:
+        """
+        Sync YouTube broadcasts with backend state.
+        - Start new broadcasts that aren't running locally
+        - Stop broadcasts that were removed from backend
+
+        Args:
+            backend_broadcasts: List of active broadcasts from backend
+        """
+        # Get set of broadcast IDs from backend
+        backend_broadcast_ids = {b["id"] for b in backend_broadcasts}
+
+        # Get set of locally running broadcast IDs
+        local_broadcast_ids = set(self._youtube_streams.keys())
+
+        # Find broadcasts to start (in backend but not running locally)
+        broadcasts_to_start = backend_broadcast_ids - local_broadcast_ids
+
+        # Find broadcasts to stop (running locally but not in backend anymore)
+        broadcasts_to_stop = local_broadcast_ids - backend_broadcast_ids
+
+        # Stop broadcasts that were removed from backend
+        for broadcast_id in broadcasts_to_stop:
+            logger.info(f"Stopping YouTube broadcast {broadcast_id} (removed from backend)")
+            process = self._youtube_streams.get(broadcast_id)
+            if process and process.poll() is None:
+                try:
+                    process.terminate()
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                except Exception as e:
+                    logger.error(f"Error stopping YouTube broadcast {broadcast_id}: {e}")
+
+            self._youtube_streams.pop(broadcast_id, None)
+            self._youtube_last_heartbeat.pop(broadcast_id, None)
+
+        # Start new broadcasts
+        for broadcast_data in backend_broadcasts:
+            broadcast_id = broadcast_data["id"]
+            if broadcast_id not in broadcasts_to_start:
+                continue
+
+            camera_id = broadcast_data["camera_id"]
+            camera_name = broadcast_data.get("camera_name", camera_id)
+            rtmp_url = broadcast_data.get("rtmp_url", "")
+            stream_key = broadcast_data.get("stream_key", "")
+
+            if not rtmp_url or not stream_key:
+                logger.warning(f"Broadcast {broadcast_id} missing RTMP URL or stream key")
+                continue
+
+            # Check if HLS stream is running for this camera
+            if camera_id not in self._streams or not self._streams[camera_id].is_running:
+                logger.debug(f"HLS stream not ready for {camera_name}, will retry on next sync")
+                continue
+
+            logger.info(f"Starting new YouTube broadcast for {camera_name}: {broadcast_id}")
+            await self.start_youtube_stream(
+                camera_id=camera_id,
+                broadcast_id=broadcast_id,
+                rtmp_url=rtmp_url,
+                stream_key=stream_key,
+            )
+
     # ==================== Camera Management ====================
 
     async def refresh_cameras(self) -> list[CameraConfig]:
         """Fetch cameras from backend and update cache."""
-        # Use consolidated endpoint
-        state = await self.fetch_device_state()
-        if state is None:
+        # Use sync_device_state which also syncs broadcasts
+        success = await self.sync_device_state()
+        if not success:
             # Fallback to legacy endpoint
             return await self._refresh_cameras_legacy()
 
-        camera_list = state.get("cameras", [])
-        cameras = [CameraConfig.from_dict(c) for c in camera_list]
-        self._cameras = {c.id: c for c in cameras}
+        cameras = list(self._cameras.values())
         logger.info(f"Loaded {len(cameras)} cameras from backend:")
         for cam in cameras:
             has_stream = "YES" if cam.has_stream else "NO"
@@ -1001,14 +1091,11 @@ class StreamManager:
 
     async def _ensure_all_streams_active(self, retry_counts: dict[str, int]) -> None:
         """Ensure all cameras with stream config have active streams."""
-        # Count active streams before refresh
-        active_before = len([s for s in self._streams.values() if s.is_running])
-
-        # Refresh camera list from backend
+        # Sync device state from backend (cameras + broadcasts in single call)
         try:
-            await self.refresh_cameras()
+            await self.sync_device_state()
         except Exception as e:
-            logger.error(f"Failed to refresh cameras during health check: {e}")
+            logger.error(f"Failed to sync device state during health check: {e}")
             return
 
         # Count cameras that should be streaming
@@ -1393,90 +1480,57 @@ class StreamManager:
         """
         Recover active YouTube broadcasts after device restart/deploy.
 
-        Fetches broadcasts in STARTING/LIVE status from backend and attempts
-        to restart FFmpeg streaming to YouTube. Will retry up to max_retries
-        times, waiting for HLS streams to become available.
+        Uses sync_device_state to fetch and start broadcasts. Retries up to
+        max_retries times, waiting for HLS streams to become available.
 
         Args:
-            max_retries: Maximum number of retry attempts per broadcast (default: 5)
+            max_retries: Maximum number of retry attempts (default: 5)
             retry_delay: Seconds to wait between retries (default: 3.0)
         """
-        logger.info("Checking for active YouTube broadcasts to recover...")
+        logger.info("Recovering YouTube broadcasts...")
 
-        try:
-            # Try to get broadcasts from consolidated endpoint first
-            state = await self.fetch_device_state()
-            if state is not None:
-                broadcasts = state.get("broadcasts", [])
-            else:
-                # Fallback to legacy endpoint
-                async with aiohttp.ClientSession() as session:
-                    url = f"{self.backend_url}/api/v1/device/youtube/broadcasts/"
-                    async with session.get(url, headers=self._get_headers()) as resp:
-                        if resp.status != 200:
-                            logger.warning(f"Failed to fetch active YouTube broadcasts: {resp.status}")
-                            return
+        for attempt in range(1, max_retries + 1):
+            try:
+                # Sync state - this will start any broadcasts that have HLS streams ready
+                await self.sync_device_state()
 
-                        data = await resp.json()
-                        broadcasts = data.get("broadcasts", [])
+                # Check if there are any broadcasts pending (in backend but not running locally)
+                if self._last_state:
+                    backend_broadcasts = self._last_state.get("broadcasts", [])
+                    backend_broadcast_ids = {b["id"] for b in backend_broadcasts}
+                    local_broadcast_ids = set(self._youtube_streams.keys())
+                    pending = backend_broadcast_ids - local_broadcast_ids
 
-            if not broadcasts:
-                logger.info("No active YouTube broadcasts to recover")
-                return
-
-            logger.info(f"Found {len(broadcasts)} YouTube broadcast(s) to recover")
-
-            for broadcast in broadcasts:
-                broadcast_id = broadcast["id"]
-                camera_id = broadcast["camera_id"]
-                camera_name = broadcast.get("camera_name", camera_id)
-                rtmp_url = broadcast.get("rtmp_url", "")
-                stream_key = broadcast.get("stream_key", "")
-
-                if not rtmp_url or not stream_key:
-                    logger.warning(f"Broadcast {broadcast_id} missing RTMP URL or stream key")
-                    await self._update_youtube_broadcast_status(
-                        broadcast_id,
-                        status="error",
-                        error_message="Missing RTMP URL or stream key for recovery",
-                    )
-                    continue
-
-                # Try to recover with retries (wait for HLS stream to be available)
-                recovered = False
-                for attempt in range(1, max_retries + 1):
-                    # Check if HLS stream is running for this camera
-                    if camera_id in self._streams and self._streams[camera_id].is_running:
-                        # Try to restart the YouTube stream
-                        logger.info(f"Recovering YouTube broadcast for {camera_name}: {broadcast_id} (attempt {attempt}/{max_retries})")
-                        success = await self.start_youtube_stream(
-                            camera_id=camera_id,
-                            broadcast_id=broadcast_id,
-                            rtmp_url=rtmp_url,
-                            stream_key=stream_key,
-                        )
-
-                        if success:
-                            logger.info(f"Successfully recovered YouTube broadcast for {camera_name}")
-                            recovered = True
-                            break
+                    if not pending:
+                        if backend_broadcasts:
+                            logger.info(f"All {len(backend_broadcasts)} YouTube broadcast(s) recovered")
                         else:
-                            logger.warning(f"Failed to start YouTube stream for {camera_name}, attempt {attempt}/{max_retries}")
-                    else:
-                        logger.info(f"HLS stream not ready for {camera_name}, waiting... (attempt {attempt}/{max_retries})")
+                            logger.info("No active YouTube broadcasts to recover")
+                        return
 
-                    # Wait before next retry (unless it's the last attempt)
-                    if attempt < max_retries:
-                        await asyncio.sleep(retry_delay)
+                    # Some broadcasts still pending (HLS not ready yet)
+                    logger.info(f"Recovery attempt {attempt}/{max_retries}: {len(pending)} broadcast(s) waiting for HLS streams")
 
-                # If all retries failed, mark as error
-                if not recovered:
+                if attempt < max_retries:
+                    await asyncio.sleep(retry_delay)
+
+            except Exception as e:
+                logger.error(f"Error recovering YouTube broadcasts (attempt {attempt}): {e}")
+                if attempt < max_retries:
+                    await asyncio.sleep(retry_delay)
+
+        # After all retries, mark remaining broadcasts as error
+        if self._last_state:
+            backend_broadcasts = self._last_state.get("broadcasts", [])
+            local_broadcast_ids = set(self._youtube_streams.keys())
+
+            for broadcast in backend_broadcasts:
+                broadcast_id = broadcast["id"]
+                if broadcast_id not in local_broadcast_ids:
+                    camera_name = broadcast.get("camera_name", broadcast["camera_id"])
                     logger.error(f"Failed to recover YouTube broadcast for {camera_name} after {max_retries} attempts")
                     await self._update_youtube_broadcast_status(
                         broadcast_id,
                         status="error",
                         error_message=f"Recovery failed after {max_retries} attempts - HLS stream not available",
                     )
-
-        except Exception as e:
-            logger.error(f"Error recovering YouTube broadcasts: {e}")
