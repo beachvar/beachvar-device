@@ -7,7 +7,7 @@ This device is responsible for:
 2. Auto-restarting streams if they fail
 3. Reporting status to the backend
 
-Future: Handle button triggers for recording
+4. Serving HLS streams via HTTP
 """
 
 import asyncio
