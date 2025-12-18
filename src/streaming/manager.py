@@ -117,6 +117,9 @@ class StreamManager:
         # Load cameras from backend
         await self.refresh_cameras()
 
+        # Recover any active YouTube broadcasts (after deploy/restart)
+        await self._recover_youtube_broadcasts()
+
         # Start monitor task
         self._monitor_task = asyncio.create_task(self._monitor_streams())
 
@@ -786,9 +789,11 @@ class StreamManager:
         stable_stream_threshold = 120  # Reset retries after 2 minutes of stable stream
         url_refresh_interval = 6 * 3600  # Refresh HLS URLs every 6 hours (half of 12h expiry)
         stream_heartbeat_interval = 10  # Send heartbeat to backend every 10 seconds
+        youtube_heartbeat_interval = 30  # Send YouTube heartbeat every 30 seconds
         last_health_check = 0
         last_url_refresh: dict[str, float] = {}  # Track last URL refresh per camera
         last_stream_heartbeat: dict[str, float] = {}  # Track last heartbeat per camera
+        last_youtube_heartbeat: dict[str, float] = {}  # Track last YouTube heartbeat per broadcast
 
         while self._running:
             try:
@@ -939,6 +944,18 @@ class StreamManager:
 
                         # Remove from active YouTube streams
                         del self._youtube_streams[broadcast_id]
+                        last_youtube_heartbeat.pop(broadcast_id, None)
+
+                # Send YouTube heartbeats (every 30 seconds)
+                for broadcast_id, process in list(self._youtube_streams.items()):
+                    if process.poll() is not None:
+                        continue  # Skip dead processes
+
+                    last_hb = last_youtube_heartbeat.get(broadcast_id, 0)
+                    if current_time - last_hb >= youtube_heartbeat_interval:
+                        # Send heartbeat (just update status to keep it alive)
+                        await self._update_youtube_broadcast_status(broadcast_id, status="live")
+                        last_youtube_heartbeat[broadcast_id] = current_time
 
             except asyncio.CancelledError:
                 break
@@ -1323,3 +1340,74 @@ class StreamManager:
             "is_running": is_running,
             "return_code": process.returncode if not is_running else None,
         }
+
+    async def _recover_youtube_broadcasts(self) -> None:
+        """
+        Recover active YouTube broadcasts after device restart/deploy.
+
+        Fetches broadcasts in STARTING/LIVE status from backend and attempts
+        to restart FFmpeg streaming to YouTube.
+        """
+        logger.info("Checking for active YouTube broadcasts to recover...")
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.backend_url}/api/device/youtube/broadcasts/"
+                async with session.get(url, headers=self._get_headers()) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"Failed to fetch active YouTube broadcasts: {resp.status}")
+                        return
+
+                    data = await resp.json()
+                    broadcasts = data.get("broadcasts", [])
+
+                    if not broadcasts:
+                        logger.info("No active YouTube broadcasts to recover")
+                        return
+
+                    logger.info(f"Found {len(broadcasts)} YouTube broadcast(s) to recover")
+
+                    for broadcast in broadcasts:
+                        broadcast_id = broadcast["id"]
+                        camera_id = broadcast["camera_id"]
+                        camera_name = broadcast.get("camera_name", camera_id)
+                        rtmp_url = broadcast.get("rtmp_url", "")
+                        stream_key = broadcast.get("stream_key", "")
+
+                        if not rtmp_url or not stream_key:
+                            logger.warning(f"Broadcast {broadcast_id} missing RTMP URL or stream key")
+                            await self._update_youtube_broadcast_status(
+                                broadcast_id,
+                                status="error",
+                                error_message="Missing RTMP URL or stream key for recovery",
+                            )
+                            continue
+
+                        # Check if HLS stream is running for this camera
+                        if camera_id not in self._streams or not self._streams[camera_id].is_running:
+                            logger.warning(
+                                f"Camera {camera_name} not streaming locally, cannot recover YouTube broadcast"
+                            )
+                            await self._update_youtube_broadcast_status(
+                                broadcast_id,
+                                status="error",
+                                error_message="Camera HLS stream not running for recovery",
+                            )
+                            continue
+
+                        # Try to restart the YouTube stream
+                        logger.info(f"Recovering YouTube broadcast for {camera_name}: {broadcast_id}")
+                        success = await self.start_youtube_stream(
+                            camera_id=camera_id,
+                            broadcast_id=broadcast_id,
+                            rtmp_url=rtmp_url,
+                            stream_key=stream_key,
+                        )
+
+                        if success:
+                            logger.info(f"Successfully recovered YouTube broadcast for {camera_name}")
+                        else:
+                            logger.error(f"Failed to recover YouTube broadcast for {camera_name}")
+
+        except Exception as e:
+            logger.error(f"Error recovering YouTube broadcasts: {e}")
