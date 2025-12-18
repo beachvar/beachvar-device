@@ -793,7 +793,6 @@ class StreamManager:
         last_health_check = 0
         last_url_refresh: dict[str, float] = {}  # Track last URL refresh per camera
         last_stream_heartbeat: dict[str, float] = {}  # Track last heartbeat per camera
-        last_youtube_heartbeat: dict[str, float] = {}  # Track last YouTube heartbeat per broadcast
 
         while self._running:
             try:
@@ -944,18 +943,18 @@ class StreamManager:
 
                         # Remove from active YouTube streams
                         del self._youtube_streams[broadcast_id]
-                        last_youtube_heartbeat.pop(broadcast_id, None)
+                        self._youtube_last_heartbeat.pop(broadcast_id, None)
 
                 # Send YouTube heartbeats (every 30 seconds)
                 for broadcast_id, process in list(self._youtube_streams.items()):
                     if process.poll() is not None:
                         continue  # Skip dead processes
 
-                    last_hb = last_youtube_heartbeat.get(broadcast_id, 0)
+                    last_hb = self._youtube_last_heartbeat.get(broadcast_id, 0)
                     if current_time - last_hb >= youtube_heartbeat_interval:
                         # Send heartbeat (just update status to keep it alive)
                         await self._update_youtube_broadcast_status(broadcast_id, status="live")
-                        last_youtube_heartbeat[broadcast_id] = current_time
+                        self._youtube_last_heartbeat[broadcast_id] = current_time
 
             except asyncio.CancelledError:
                 break
@@ -1130,6 +1129,9 @@ class StreamManager:
     # Active YouTube stream processes: {broadcast_id: subprocess.Popen}
     _youtube_streams: dict[str, subprocess.Popen] = {}
 
+    # Last heartbeat timestamp for each YouTube broadcast
+    _youtube_last_heartbeat: dict[str, float] = {}
+
     async def start_youtube_stream(
         self,
         camera_id: str,
@@ -1205,6 +1207,9 @@ class StreamManager:
             )
 
             self._youtube_streams[broadcast_id] = process
+
+            # Mark as recently started so heartbeat loop doesn't send immediately
+            self._youtube_last_heartbeat[broadcast_id] = time.time()
 
             logger.info(f"YouTube stream started for {camera_name} (PID: {process.pid})")
 
