@@ -357,8 +357,8 @@ async def main():
     )
     await stream_manager.start()
 
-    # Start HTTP server (for tunnel access)
-    # Use 0.0.0.0 to allow access from cloudflared and within Docker
+    # Start HTTP server (serves HLS streams and admin panel)
+    # Use 0.0.0.0 to allow access from external containers and within Docker
     http_server = DeviceHTTPServer(
         host="0.0.0.0",
         port=http_port,

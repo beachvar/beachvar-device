@@ -63,9 +63,6 @@ class GatewayClient:
         # Pending command responses
         self._pending_responses: dict[str, asyncio.Future] = {}
 
-        # Tunnel config callback
-        self.on_tunnel_config: Optional[Callable] = None
-
     def register_command_handler(self, action: str, handler: Callable):
         """
         Register a handler for a specific command action.
@@ -162,11 +159,6 @@ class GatewayClient:
                         self.token = new_token
                         self._save_token(new_token)
                         logger.info("Token rotated successfully")
-
-                    # Handle tunnel configuration
-                    tunnel_config = payload.get('tunnel')
-                    if tunnel_config and self.on_tunnel_config:
-                        asyncio.create_task(self.on_tunnel_config(tunnel_config))
 
                     return True
                 else:

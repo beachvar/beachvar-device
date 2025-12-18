@@ -6,7 +6,6 @@ Software para dispositivo de captura de video (Raspberry Pi) do sistema BeachVar
 
 - Streaming de cameras RTSP via FFmpeg
 - HLS output para Cloudflare Stream
-- Terminal SSH via navegador (ttyd)
 - Monitoramento de sistema (CPU, memoria, temperatura)
 - Auto-restart de streams com retry progressivo
 
@@ -25,32 +24,7 @@ git clone https://github.com/beachvar/beachvar-device.git
 cd beachvar-device
 ```
 
-### 2. Configurar usuario SSH (para terminal web)
-
-O terminal web permite acesso SSH ao host via navegador. Para funcionar sem senha, crie um usuario dedicado:
-
-```bash
-# Criar usuario 'device' com permissao sudo
-sudo useradd -m -s /bin/bash -G sudo device
-
-# Permitir sudo sem senha
-echo "device ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/device
-sudo chmod 440 /etc/sudoers.d/device
-
-# Gerar chave SSH no diretorio do usuario
-sudo -u device ssh-keygen -t ed25519 -f /home/device/.ssh/id_ed25519 -N ""
-
-# Configurar authorized_keys para login sem senha
-sudo -u device bash -c 'cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys'
-sudo chmod 600 /home/device/.ssh/authorized_keys
-
-# Copiar chave para local acessivel pelo Docker
-sudo mkdir -p /etc/beachvar
-sudo cp /home/device/.ssh/id_ed25519 /etc/beachvar/ssh_key
-sudo chmod 644 /etc/beachvar/ssh_key
-```
-
-### 3. Configurar variaveis de ambiente
+### 2. Configurar variaveis de ambiente
 
 Crie o arquivo `.env`:
 
@@ -67,7 +41,7 @@ CLOUDFLARE_ACCOUNT_ID=
 CLOUDFLARE_API_TOKEN=
 ```
 
-### 4. Iniciar o container
+### 3. Iniciar o container
 
 ```bash
 docker compose up -d
@@ -86,20 +60,11 @@ services:
     command: python -O main.py
     env_file:
       - .env
-    environment:
-      # SSH config for web terminal (access to host)
-      - SSH_HOST=localhost
-      - SSH_USER=device
-      - SSH_PORT=22
-      - SSH_KEY_PATH=/ssh/id_ed25519
     volumes:
-      # Mount SSH key for passwordless authentication to host
-      - /etc/beachvar/ssh_key:/ssh/id_ed25519:ro
+      - /tmp/hls:/tmp/hls
     ports:
-      - "8080:8080"   # Main HTTP server
-      - "7682:7682"   # ttyd web terminal
+      - "8080:8080"
     restart: unless-stopped
-    network_mode: host
 ```
 
 ### Variaveis de Ambiente
@@ -109,10 +74,7 @@ services:
 | `DEVICE_ID` | Identificador unico do device | `unknown` |
 | `DEVICE_TOKEN` | Token de autenticacao com backend | - |
 | `BACKEND_URL` | URL da API backend | - |
-| `SSH_HOST` | Host para conexao SSH | `localhost` |
-| `SSH_USER` | Usuario SSH | `pi` |
-| `SSH_PORT` | Porta SSH | `22` |
-| `SSH_KEY_PATH` | Caminho da chave SSH no container | - |
+| `GATEWAY_URL` | URL do gateway WebSocket | - |
 
 ## Endpoints
 
@@ -131,7 +93,6 @@ services:
 | `GET /admin/status` | Status do device |
 | `GET /admin/system` | Informacoes do sistema |
 | `POST /admin/restart` | Reiniciar device |
-| `GET /admin/terminal-config` | Config do terminal SSH |
 | `GET /admin/registered-cameras` | Listar cameras |
 | `POST /admin/registered-cameras` | Criar camera |
 | `DELETE /admin/registered-cameras/{id}` | Remover camera |
@@ -192,12 +153,6 @@ beachvar-device/
 ```
 
 ## Troubleshooting
-
-### Terminal SSH nao conecta
-
-1. Verifique se o usuario existe: `id device`
-2. Verifique permissoes da chave: `ls -la /home/device/.ssh/`
-3. Teste conexao SSH local: `ssh -i /home/device/.ssh/id_ed25519 device@localhost`
 
 ### Stream nao inicia
 

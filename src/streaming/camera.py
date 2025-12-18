@@ -11,7 +11,7 @@ class StreamMode(str, Enum):
     """Stream mode - how the camera streams video."""
 
     CLOUDFLARE = "cloudflare"  # Stream to Cloudflare Stream (RTMPS)
-    LOCAL_HLS = "local_hls"    # Stream HLS locally (via tunnel)
+    LOCAL_HLS = "local_hls"    # Stream HLS locally (served via HTTP)
 
 
 @dataclass
