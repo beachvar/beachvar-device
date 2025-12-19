@@ -41,7 +41,7 @@ class GPIOButtonHandler:
     """
     Handles GPIO button presses on Raspberry Pi.
 
-    Monitors configured GPIO pins and sends button press events to the backend.
+    Monitors pre-configured GPIO pins and sends button press events to the backend.
     Uses polling with state change detection and debouncing.
 
     Button wiring:
@@ -56,6 +56,9 @@ class GPIOButtonHandler:
     POLL_INTERVAL = 0.05
     # GPIO chip number (0 for Raspberry Pi)
     GPIO_CHIP = 0
+    # Pre-configured GPIO pins to always monitor (physical buttons on the device)
+    # These pins are always listened to, regardless of backend configuration
+    FIXED_GPIO_PINS = [17, 27, 24, 5, 16]
 
     def __init__(
         self,
@@ -79,8 +82,7 @@ class GPIOButtonHandler:
         Start the GPIO button handler.
 
         Returns True if GPIO is available and initialized successfully.
-        The handler starts even without buttons configured, and will begin
-        monitoring when buttons are added via refresh_config().
+        Always monitors FIXED_GPIO_PINS, and maps presses to backend button configs.
         """
         if not GPIO_AVAILABLE:
             logger.info("GPIO not available - button handler disabled")
@@ -97,29 +99,25 @@ class GPIOButtonHandler:
         # Create HTTP session
         self._session = aiohttp.ClientSession()
 
-        # Fetch button configuration from backend
+        # Configure fixed GPIO pins (always monitored)
+        self._configure_fixed_gpio_pins()
+
+        # Fetch button configuration from backend (maps GPIO pins to button numbers)
         await self._fetch_button_config()
 
-        # Configure any existing buttons
-        self._configure_gpio_pins(self.buttons.keys())
-
-        # Start monitoring task (even if no buttons yet - they can be added later)
+        # Start monitoring task
         self._running = True
         self._monitor_task = asyncio.create_task(self._monitor_buttons())
 
-        logger.info(f"GPIO button handler started with {len(self.buttons)} buttons")
+        logger.info(f"GPIO button handler started - monitoring pins {self.FIXED_GPIO_PINS}, {len(self.buttons)} configured in backend")
         return True
 
-    def _configure_gpio_pins(self, pins) -> None:
-        """Configure GPIO pins as inputs with pull-up resistors."""
+    def _configure_fixed_gpio_pins(self) -> None:
+        """Configure the fixed GPIO pins as inputs with pull-up resistors."""
         if self._gpio_handle is None or not GPIO_AVAILABLE:
             return
 
-        for gpio_pin in pins:
-            button = self.buttons.get(gpio_pin)
-            if not button:
-                continue
-
+        for gpio_pin in self.FIXED_GPIO_PINS:
             try:
                 lgpio.gpio_claim_input(
                     self._gpio_handle,
@@ -129,10 +127,7 @@ class GPIOButtonHandler:
                 # Read initial state
                 state = lgpio.gpio_read(self._gpio_handle, gpio_pin)
                 state_str = "RELEASED (HIGH)" if state else "PRESSED (LOW)"
-                logger.info(
-                    f"Configured GPIO{gpio_pin} for button {button.button_number} "
-                    f"({button.label or 'no label'}) - initial: {state_str}"
-                )
+                logger.info(f"Configured fixed GPIO{gpio_pin} - initial: {state_str}")
             except Exception as e:
                 logger.error(f"Failed to configure GPIO {gpio_pin}: {e}")
 
@@ -190,34 +185,24 @@ class GPIOButtonHandler:
             logger.error(f"Error fetching button config: {e}")
 
     async def refresh_config(self) -> None:
-        """Refresh button configuration from backend."""
-        old_pins = set(self.buttons.keys())
+        """Refresh button configuration from backend.
+
+        This updates the mapping between GPIO pins and button numbers.
+        The fixed GPIO pins are always monitored; this just updates which
+        pins have backend configurations.
+        """
+        old_count = len(self.buttons)
         await self._fetch_button_config()
-        new_pins = set(self.buttons.keys())
+        new_count = len(self.buttons)
 
-        removed_pins = old_pins - new_pins
-        added_pins = new_pins - old_pins
-
-        if self._gpio_handle is not None and GPIO_AVAILABLE:
-            # Release old pins that are no longer used
-            for pin in removed_pins:
-                try:
-                    lgpio.gpio_free(self._gpio_handle, pin)
-                    logger.info(f"Released GPIO {pin}")
-                except Exception as e:
-                    logger.error(f"Error releasing GPIO {pin}: {e}")
-
-            # Configure new pins
-            self._configure_gpio_pins(added_pins)
-
-        if added_pins:
-            logger.info(f"Added {len(added_pins)} new button(s): GPIO {list(added_pins)}")
-        if removed_pins:
-            logger.info(f"Removed {len(removed_pins)} button(s): GPIO {list(removed_pins)}")
+        logger.info(f"Button config refreshed: {old_count} -> {new_count} buttons configured")
 
     async def _monitor_buttons(self) -> None:
         """
-        Monitor GPIO buttons for presses using polling.
+        Monitor fixed GPIO pins for button presses using polling.
+
+        Always monitors FIXED_GPIO_PINS. When a button is pressed, checks if
+        there's a backend configuration for that pin and sends the event.
 
         Uses state change detection with debouncing.
         Button pressed = LOW (0), released = HIGH (1) with pull-up resistor.
@@ -225,24 +210,22 @@ class GPIOButtonHandler:
         # Store previous states for edge detection
         prev_states: dict[int, int] = {}
 
-        # Initialize states for all configured buttons
-        for gpio_pin in self.buttons:
+        # Initialize states for all fixed GPIO pins
+        for gpio_pin in self.FIXED_GPIO_PINS:
             if self._gpio_handle is not None:
                 try:
                     prev_states[gpio_pin] = lgpio.gpio_read(self._gpio_handle, gpio_pin)
                 except Exception:
                     prev_states[gpio_pin] = 1  # Assume released (HIGH)
 
-        logger.info(f"Monitoring GPIO buttons (starting with {len(self.buttons)})...")
+        logger.info(f"Monitoring fixed GPIO pins: {self.FIXED_GPIO_PINS}")
 
         while self._running:
-            # Copy buttons dict to avoid issues if it's modified during iteration
-            current_buttons = dict(self.buttons)
+            if self._gpio_handle is None:
+                await asyncio.sleep(self.POLL_INTERVAL)
+                continue
 
-            for gpio_pin, button in current_buttons.items():
-                if self._gpio_handle is None:
-                    continue
-
+            for gpio_pin in self.FIXED_GPIO_PINS:
                 try:
                     # Read current state (0 = pressed, 1 = released with pull-up)
                     current_state = lgpio.gpio_read(self._gpio_handle, gpio_pin)
@@ -257,20 +240,31 @@ class GPIOButtonHandler:
 
                             if now - last > self.DEBOUNCE_MS:
                                 self.last_press[gpio_pin] = now
-                                logger.info(
-                                    f"Button {button.button_number} PRESSED "
-                                    f"(GPIO{gpio_pin}, {button.label or 'no label'})"
-                                )
 
-                                # Send event to backend asynchronously
-                                asyncio.create_task(
-                                    self._send_button_press(button.button_number)
-                                )
+                                # Check if this pin has a backend configuration
+                                button = self.buttons.get(gpio_pin)
+                                if button:
+                                    logger.info(
+                                        f"GPIO{gpio_pin} PRESSED -> Button {button.button_number} "
+                                        f"({button.label or 'no label'})"
+                                    )
+                                    # Send event to backend asynchronously
+                                    asyncio.create_task(
+                                        self._send_button_press(button.button_number)
+                                    )
+                                else:
+                                    logger.info(
+                                        f"GPIO{gpio_pin} PRESSED (no backend config)"
+                                    )
                         else:
                             # Button released (rising edge: LOW -> HIGH)
-                            logger.debug(
-                                f"Button {button.button_number} released (GPIO{gpio_pin})"
-                            )
+                            button = self.buttons.get(gpio_pin)
+                            if button:
+                                logger.info(
+                                    f"GPIO{gpio_pin} RELEASED -> Button {button.button_number}"
+                                )
+                            else:
+                                logger.info(f"GPIO{gpio_pin} RELEASED")
 
                         prev_states[gpio_pin] = current_state
 
