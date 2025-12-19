@@ -76,6 +76,7 @@ class GPIOButtonHandler:
         self._gpio_handle: int | None = None
         self._monitor_task: asyncio.Task | None = None
         self._session: aiohttp.ClientSession | None = None
+        self._allocated_pins: set[int] = set()  # Pins successfully allocated
 
     async def start(self) -> bool:
         """
@@ -109,13 +110,15 @@ class GPIOButtonHandler:
         self._running = True
         self._monitor_task = asyncio.create_task(self._monitor_buttons())
 
-        logger.info(f"GPIO button handler started - monitoring pins {self.FIXED_GPIO_PINS}, {len(self.buttons)} configured in backend")
+        logger.info(f"GPIO button handler started - {len(self._allocated_pins)} pins allocated, {len(self.buttons)} buttons configured in backend")
         return True
 
     def _configure_fixed_gpio_pins(self) -> None:
         """Configure the fixed GPIO pins as inputs with pull-up resistors."""
         if self._gpio_handle is None or not GPIO_AVAILABLE:
             return
+
+        self._allocated_pins.clear()
 
         for gpio_pin in self.FIXED_GPIO_PINS:
             try:
@@ -128,8 +131,15 @@ class GPIOButtonHandler:
                 state = lgpio.gpio_read(self._gpio_handle, gpio_pin)
                 state_str = "RELEASED (HIGH)" if state else "PRESSED (LOW)"
                 logger.info(f"Configured fixed GPIO{gpio_pin} - initial: {state_str}")
+                # Track successfully allocated pin
+                self._allocated_pins.add(gpio_pin)
             except Exception as e:
-                logger.error(f"Failed to configure GPIO {gpio_pin}: {e}")
+                logger.warning(f"GPIO{gpio_pin} not available: {e}")
+
+        if self._allocated_pins:
+            logger.info(f"Successfully allocated GPIO pins: {sorted(self._allocated_pins)}")
+        else:
+            logger.warning("No GPIO pins could be allocated")
 
     async def stop(self) -> None:
         """Stop the GPIO button handler."""
@@ -199,10 +209,11 @@ class GPIOButtonHandler:
 
     async def _monitor_buttons(self) -> None:
         """
-        Monitor fixed GPIO pins for button presses using polling.
+        Monitor allocated GPIO pins for button presses using polling.
 
-        Always monitors FIXED_GPIO_PINS. When a button is pressed, checks if
-        there's a backend configuration for that pin and sends the event.
+        Only monitors pins that were successfully allocated. When a button is
+        pressed, checks if there's a backend configuration for that pin and
+        sends the event.
 
         Uses state change detection with debouncing.
         Button pressed = LOW (0), released = HIGH (1) with pull-up resistor.
@@ -210,22 +221,26 @@ class GPIOButtonHandler:
         # Store previous states for edge detection
         prev_states: dict[int, int] = {}
 
-        # Initialize states for all fixed GPIO pins
-        for gpio_pin in self.FIXED_GPIO_PINS:
+        # Initialize states for allocated GPIO pins only
+        for gpio_pin in self._allocated_pins:
             if self._gpio_handle is not None:
                 try:
                     prev_states[gpio_pin] = lgpio.gpio_read(self._gpio_handle, gpio_pin)
                 except Exception:
                     prev_states[gpio_pin] = 1  # Assume released (HIGH)
 
-        logger.info(f"Monitoring fixed GPIO pins: {self.FIXED_GPIO_PINS}")
+        if not self._allocated_pins:
+            logger.warning("No GPIO pins allocated - button monitoring disabled")
+            return
+
+        logger.info(f"Monitoring allocated GPIO pins: {sorted(self._allocated_pins)}")
 
         while self._running:
             if self._gpio_handle is None:
                 await asyncio.sleep(self.POLL_INTERVAL)
                 continue
 
-            for gpio_pin in self.FIXED_GPIO_PINS:
+            for gpio_pin in self._allocated_pins:
                 try:
                     # Read current state (0 = pressed, 1 = released with pull-up)
                     current_state = lgpio.gpio_read(self._gpio_handle, gpio_pin)
