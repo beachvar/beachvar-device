@@ -1,3 +1,18 @@
+# --- Build stage ---
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Copy dependency files
+COPY pyproject.toml uv.lock* ./
+
+# Create virtual environment and install dependencies
+RUN uv venv /app/.venv && uv sync --frozen --no-dev --no-install-project
+
+# --- Final stage ---
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -5,31 +20,24 @@ WORKDIR /app
 # Set timezone to Brazil
 ENV TZ=America/Sao_Paulo
 
-# Install system dependencies
+# Install only runtime dependencies (smaller image)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    v4l-utils \
-    usbutils \
     ffmpeg \
     tzdata \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Install uv for fast dependency management
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# Copy virtual environment from builder
+COPY --from=builder /app/.venv /app/.venv
 
-# Copy dependency file first (for layer caching)
-COPY pyproject.toml .
-
-# Install dependencies (cached unless pyproject.toml changes)
-RUN uv pip install --system -e .
-
-# Copy application code (changes frequently, so comes last)
+# Copy application code
 COPY src/ src/
 COPY main.py .
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
+ENV PATH="/app/.venv/bin:$PATH"
 
 CMD ["python", "main.py"]
