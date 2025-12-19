@@ -67,6 +67,12 @@
                     </h1>
                 </div>
 
+                <!-- Device Name -->
+                <div class="hidden lg:block">
+                    <h2 id="device-name" class="text-lg font-semibold text-gray-200">--</h2>
+                    <p id="complex-name" class="text-sm text-gray-500">--</p>
+                </div>
+
                 <!-- Status Badge -->
                 <div id="connection-status" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-800 text-sm">
                     <span id="status-dot" class="w-2 h-2 rounded-full bg-gray-500 pulse-dot"></span>
@@ -247,6 +253,19 @@
             }
         }
 
+        async function fetchDeviceInfo() {
+            try {
+                const response = await fetch('/admin/device-info');
+                const data = await response.json();
+                document.getElementById('device-name').textContent = data.device_name || data.device_id || '--';
+                document.getElementById('complex-name').textContent = data.complex_name || '';
+                return data;
+            } catch (error) {
+                console.error('Error fetching device info:', error);
+                return null;
+            }
+        }
+
         function openTerminal() {
             window.open(`${window.location.origin}/admin/terminal/`, '_blank');
         }
@@ -353,6 +372,7 @@
         }
 
         // Initial load
+        fetchDeviceInfo();  // Fetch once at startup (doesn't change often)
         refreshData();
 
         // Auto-refresh every 5 seconds

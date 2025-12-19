@@ -54,6 +54,7 @@ class DeviceHTTPServer:
         # Admin routes (protected by Cloudflare: /admin/*)
         self.app.router.add_get("/admin/status", self.handle_status)
         self.app.router.add_get("/admin/system", self.handle_system)
+        self.app.router.add_get("/admin/device-info", self.handle_device_info)
         self.app.router.add_post("/admin/restart", self.handle_restart)
 
         # Registered cameras management (protected by Cloudflare)
@@ -237,6 +238,28 @@ class DeviceHTTPServer:
             "cpu_percent": cpu_percent,
             "memory_percent": memory.percent,
             "uptime_seconds": int(uptime_seconds),
+        })
+
+    async def handle_device_info(self, request: web.Request) -> web.Response:
+        """Device info from backend state."""
+        if not self.stream_manager:
+            return web.json_response(
+                {"error": "Stream manager not configured"},
+                status=503
+            )
+
+        # Get cached state from stream manager
+        state = self.stream_manager._last_state or {}
+
+        # Extract device info from state
+        device_info = state.get("device", {})
+        complex_info = state.get("complex", {})
+
+        return web.json_response({
+            "device_id": self.device_id,
+            "device_name": device_info.get("name", self.device_id),
+            "complex_name": complex_info.get("name"),
+            "complex_id": complex_info.get("id"),
         })
 
     async def handle_restart(self, request: web.Request) -> web.Response:
