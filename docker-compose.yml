@@ -13,6 +13,9 @@ services:
     volumes:
       # Mount SSH key (will be copied with correct permissions by entrypoint)
       - /etc/beachvar/ssh_key:/ssh/id_ed25519.mount:ro
+    devices:
+      # GPIO access for Raspberry Pi button handling
+      - /dev/gpiochip0:/dev/gpiochip0
     restart: unless-stopped
     # Use host network for SSH access to host machine
     network_mode: host
