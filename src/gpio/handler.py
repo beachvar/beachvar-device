@@ -248,11 +248,17 @@ class GPIOButtonHandler:
         url = f"{self.backend_url}/api/v1/device/buttons/{button_number}/press/"
         headers = self._get_auth_headers()
 
+        logger.info(f"[HTTP] POST {url}")
+
         try:
             if self._session:
                 async with self._session.post(url, headers=headers) as response:
+                    response_text = await response.text()
+                    logger.info(f"[HTTP] Response {response.status}: {response_text[:500]}")
+
                     if response.status == 200:
-                        data = await response.json()
+                        import json
+                        data = json.loads(response_text)
                         action = data.get("action")
                         if action:
                             # Action is executed asynchronously by backend
@@ -269,10 +275,11 @@ class GPIOButtonHandler:
                     elif response.status == 404:
                         logger.info(f"Button {button_number} not configured in backend")
                     else:
-                        error = await response.text()
-                        logger.error(f"Button press failed: {response.status} - {error}")
+                        logger.error(f"Button press failed: {response.status} - {response_text}")
+            else:
+                logger.error("[HTTP] No session available - cannot send button press")
         except Exception as e:
-            logger.error(f"Error sending button press: {e}")
+            logger.error(f"Error sending button press: {e}", exc_info=True)
 
     def _get_auth_headers(self) -> dict:
         """Get authentication headers for backend API."""
