@@ -723,3 +723,9 @@ class DeviceHTTPServer:
                                 {"error": f"Backend error: {response.status}"},
                                 status=response.status
                             )
+        except Exception as e:
+            logger.error(f"Error deleting button: {e}")
+            return web.json_response(
+                {"error": str(e)},
+                status=500
+            )
