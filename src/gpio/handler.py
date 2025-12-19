@@ -79,16 +79,11 @@ class GPIOButtonHandler:
         Start the GPIO button handler.
 
         Returns True if GPIO is available and initialized successfully.
+        The handler starts even without buttons configured, and will begin
+        monitoring when buttons are added via refresh_config().
         """
         if not GPIO_AVAILABLE:
             logger.info("GPIO not available - button handler disabled")
-            return False
-
-        # Fetch button configuration from backend
-        await self._fetch_button_config()
-
-        if not self.buttons:
-            logger.info("No buttons configured - GPIO handler inactive")
             return False
 
         # Initialize GPIO
@@ -99,8 +94,32 @@ class GPIOButtonHandler:
             logger.error(f"Failed to open GPIO chip: {e}")
             return False
 
-        # Configure buttons as inputs with pull-up resistors
-        for gpio_pin, button in self.buttons.items():
+        # Create HTTP session
+        self._session = aiohttp.ClientSession()
+
+        # Fetch button configuration from backend
+        await self._fetch_button_config()
+
+        # Configure any existing buttons
+        self._configure_gpio_pins(self.buttons.keys())
+
+        # Start monitoring task (even if no buttons yet - they can be added later)
+        self._running = True
+        self._monitor_task = asyncio.create_task(self._monitor_buttons())
+
+        logger.info(f"GPIO button handler started with {len(self.buttons)} buttons")
+        return True
+
+    def _configure_gpio_pins(self, pins) -> None:
+        """Configure GPIO pins as inputs with pull-up resistors."""
+        if self._gpio_handle is None or not GPIO_AVAILABLE:
+            return
+
+        for gpio_pin in pins:
+            button = self.buttons.get(gpio_pin)
+            if not button:
+                continue
+
             try:
                 lgpio.gpio_claim_input(
                     self._gpio_handle,
@@ -116,16 +135,6 @@ class GPIOButtonHandler:
                 )
             except Exception as e:
                 logger.error(f"Failed to configure GPIO {gpio_pin}: {e}")
-
-        # Create HTTP session
-        self._session = aiohttp.ClientSession()
-
-        # Start monitoring task
-        self._running = True
-        self._monitor_task = asyncio.create_task(self._monitor_buttons())
-
-        logger.info(f"GPIO button handler started with {len(self.buttons)} buttons")
-        return True
 
     async def stop(self) -> None:
         """Stop the GPIO button handler."""
@@ -186,9 +195,12 @@ class GPIOButtonHandler:
         await self._fetch_button_config()
         new_pins = set(self.buttons.keys())
 
+        removed_pins = old_pins - new_pins
+        added_pins = new_pins - old_pins
+
         if self._gpio_handle is not None and GPIO_AVAILABLE:
             # Release old pins that are no longer used
-            for pin in old_pins - new_pins:
+            for pin in removed_pins:
                 try:
                     lgpio.gpio_free(self._gpio_handle, pin)
                     logger.info(f"Released GPIO {pin}")
@@ -196,17 +208,12 @@ class GPIOButtonHandler:
                     logger.error(f"Error releasing GPIO {pin}: {e}")
 
             # Configure new pins
-            for pin in new_pins - old_pins:
-                button = self.buttons[pin]
-                try:
-                    lgpio.gpio_claim_input(
-                        self._gpio_handle,
-                        pin,
-                        lgpio.SET_PULL_UP
-                    )
-                    logger.info(f"Configured new GPIO {pin} for button {button.button_number}")
-                except Exception as e:
-                    logger.error(f"Failed to configure GPIO {pin}: {e}")
+            self._configure_gpio_pins(added_pins)
+
+        if added_pins:
+            logger.info(f"Added {len(added_pins)} new button(s): GPIO {list(added_pins)}")
+        if removed_pins:
+            logger.info(f"Removed {len(removed_pins)} button(s): GPIO {list(removed_pins)}")
 
     async def _monitor_buttons(self) -> None:
         """
@@ -226,10 +233,13 @@ class GPIOButtonHandler:
                 except Exception:
                     prev_states[gpio_pin] = 1  # Assume released (HIGH)
 
-        logger.info(f"Monitoring {len(self.buttons)} GPIO buttons...")
+        logger.info(f"Monitoring GPIO buttons (starting with {len(self.buttons)})...")
 
         while self._running:
-            for gpio_pin, button in self.buttons.items():
+            # Copy buttons dict to avoid issues if it's modified during iteration
+            current_buttons = dict(self.buttons)
+
+            for gpio_pin, button in current_buttons.items():
                 if self._gpio_handle is None:
                     continue
 
