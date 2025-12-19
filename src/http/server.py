@@ -255,11 +255,28 @@ class DeviceHTTPServer:
         device_info = state.get("device", {})
         complex_info = state.get("complex", {})
 
+        # Get YouTube broadcasts info
+        broadcasts = state.get("broadcasts", [])
+        active_youtube_streams = []
+        for broadcast in broadcasts:
+            broadcast_id = broadcast.get("id")
+            is_running = (
+                broadcast_id in self.stream_manager._youtube_streams
+                and self.stream_manager._youtube_streams[broadcast_id].poll() is None
+            )
+            active_youtube_streams.append({
+                "id": broadcast_id,
+                "camera_id": broadcast.get("camera_id"),
+                "camera_name": broadcast.get("camera_name"),
+                "is_running": is_running,
+            })
+
         return web.json_response({
             "device_id": self.device_id,
             "device_name": device_info.get("name", self.device_id),
             "complex_name": complex_info.get("name"),
             "complex_id": complex_info.get("id"),
+            "youtube_broadcasts": active_youtube_streams,
         })
 
     async def handle_restart(self, request: web.Request) -> web.Response:
