@@ -169,6 +169,36 @@
                 </div>
             </div>
 
+            <!-- GPIO Buttons Section -->
+            <div class="mb-6">
+                <div class="bg-dark-900 rounded-xl border border-gray-800 overflow-hidden">
+                    <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-lg bg-rose-500/10 flex items-center justify-center">
+                                <svg class="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold">Botoes GPIO</h3>
+                                <p class="text-sm text-gray-500"><span id="buttons-total">0</span> configurados</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="openAddButtonModal()" class="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors" title="Adicionar botao">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                            </button>
+                            <button onclick="refreshButtons()" class="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors" title="Atualizar botoes">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="buttons-list" class="divide-y divide-gray-800">
+                        <div class="px-5 py-8 text-center text-gray-500">
+                            <p>Carregando botoes...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Cards Row -->
             <div class="grid lg:grid-cols-2 gap-6">
                 <!-- Terminal Card -->
@@ -225,6 +255,98 @@
             </footer>
         </div>
     </main>
+
+    <!-- Add Button Modal -->
+    <div id="add-button-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div class="bg-dark-900 rounded-xl border border-gray-800 w-full max-w-md mx-4 shadow-xl">
+            <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+                <h3 class="font-semibold">Adicionar Botao GPIO</h3>
+                <button onclick="closeAddButtonModal()" class="p-1 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-gray-200">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Numero do Botao</label>
+                    <input type="number" id="add-button-number" min="1" max="10" value="1" class="w-full px-4 py-2 rounded-lg bg-dark-800 border border-gray-700 text-gray-100 focus:outline-none focus:border-primary-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Pino GPIO</label>
+                    <select id="add-gpio-pin" class="w-full px-4 py-2 rounded-lg bg-dark-800 border border-gray-700 text-gray-100 focus:outline-none focus:border-primary-500">
+                        <option value="17">GPIO 17</option>
+                        <option value="24">GPIO 24</option>
+                        <option value="16">GPIO 16</option>
+                        <option value="27">GPIO 27</option>
+                        <option value="22">GPIO 22</option>
+                        <option value="5">GPIO 5</option>
+                        <option value="6">GPIO 6</option>
+                        <option value="13">GPIO 13</option>
+                        <option value="19">GPIO 19</option>
+                        <option value="26">GPIO 26</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Label (opcional)</label>
+                    <input type="text" id="add-button-label" placeholder="Ex: Gravar, Live YouTube" class="w-full px-4 py-2 rounded-lg bg-dark-800 border border-gray-700 text-gray-100 focus:outline-none focus:border-primary-500 placeholder-gray-600">
+                </div>
+            </div>
+            <div class="px-5 py-4 border-t border-gray-800 flex justify-end gap-3">
+                <button onclick="closeAddButtonModal()" class="px-4 py-2 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors">Cancelar</button>
+                <button onclick="createButton()" class="px-4 py-2 rounded-lg bg-primary-500 hover:bg-primary-600 text-white font-medium transition-colors">Adicionar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Button Modal -->
+    <div id="edit-button-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div class="bg-dark-900 rounded-xl border border-gray-800 w-full max-w-md mx-4 shadow-xl">
+            <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+                <h3 class="font-semibold">Editar Botao GPIO</h3>
+                <button onclick="closeEditButtonModal()" class="p-1 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-gray-200">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-5 space-y-4">
+                <input type="hidden" id="edit-button-id">
+                <div>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Numero do Botao</label>
+                    <input type="number" id="edit-button-number" disabled class="w-full px-4 py-2 rounded-lg bg-dark-800 border border-gray-700 text-gray-500 cursor-not-allowed">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Pino GPIO</label>
+                    <select id="edit-gpio-pin" class="w-full px-4 py-2 rounded-lg bg-dark-800 border border-gray-700 text-gray-100 focus:outline-none focus:border-primary-500">
+                        <option value="17">GPIO 17</option>
+                        <option value="24">GPIO 24</option>
+                        <option value="16">GPIO 16</option>
+                        <option value="27">GPIO 27</option>
+                        <option value="22">GPIO 22</option>
+                        <option value="5">GPIO 5</option>
+                        <option value="6">GPIO 6</option>
+                        <option value="13">GPIO 13</option>
+                        <option value="19">GPIO 19</option>
+                        <option value="26">GPIO 26</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Label</label>
+                    <input type="text" id="edit-button-label" placeholder="Ex: Gravar, Live YouTube" class="w-full px-4 py-2 rounded-lg bg-dark-800 border border-gray-700 text-gray-100 focus:outline-none focus:border-primary-500 placeholder-gray-600">
+                </div>
+                <div class="flex items-center gap-3">
+                    <label class="block text-sm font-medium text-gray-400">Ativo</label>
+                    <button type="button" id="edit-button-active" onclick="toggleEditActive()" class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-gray-700 transition-colors duration-200 ease-in-out focus:outline-none" role="switch" aria-checked="true">
+                        <span class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                    </button>
+                </div>
+            </div>
+            <div class="px-5 py-4 border-t border-gray-800 flex justify-between">
+                <button onclick="deleteButton()" class="px-4 py-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors">Excluir</button>
+                <div class="flex gap-3">
+                    <button onclick="closeEditButtonModal()" class="px-4 py-2 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors">Cancelar</button>
+                    <button onclick="updateButton()" class="px-4 py-2 rounded-lg bg-primary-500 hover:bg-primary-600 text-white font-medium transition-colors">Salvar</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script>
         let refreshInterval;
@@ -390,8 +512,213 @@
             await fetchCameras();
         }
 
+        // ==================== GPIO Buttons ====================
+
+        let buttonsData = [];
+        let editButtonActive = true;
+
+        async function fetchButtons() {
+            try {
+                const response = await fetch('/admin/buttons');
+                const data = await response.json();
+
+                buttonsData = data.buttons || [];
+                document.getElementById('buttons-total').textContent = buttonsData.length;
+
+                renderButtons(buttonsData);
+                return data;
+            } catch (error) {
+                console.error('Error fetching buttons:', error);
+                document.getElementById('buttons-list').innerHTML = `
+                    <div class="px-5 py-8 text-center text-gray-500">
+                        <p>Erro ao carregar botoes</p>
+                    </div>
+                `;
+                return null;
+            }
+        }
+
+        function renderButtons(buttons) {
+            const container = document.getElementById('buttons-list');
+
+            if (buttons.length === 0) {
+                container.innerHTML = `
+                    <div class="px-5 py-8 text-center text-gray-500">
+                        <p>Nenhum botao configurado</p>
+                        <button onclick="openAddButtonModal()" class="mt-2 text-primary-400 hover:text-primary-300">Adicionar botao</button>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = buttons.map(btn => `
+                <div class="px-5 py-4 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg ${btn.is_active ? 'bg-rose-500/10' : 'bg-gray-800'} flex items-center justify-center">
+                            <span class="text-sm font-bold ${btn.is_active ? 'text-rose-400' : 'text-gray-500'}">${btn.button_number}</span>
+                        </div>
+                        <div>
+                            <p class="font-medium">${escapeHtml(btn.label) || `Botao ${btn.button_number}`}</p>
+                            <p class="text-sm text-gray-500">GPIO ${btn.gpio_pin}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        ${btn.is_active
+                            ? '<span class="px-2 py-1 text-xs font-medium rounded-full bg-green-500/10 text-green-400">Ativo</span>'
+                            : '<span class="px-2 py-1 text-xs font-medium rounded-full bg-gray-800 text-gray-500">Inativo</span>'
+                        }
+                        <button onclick="openEditButtonModal('${btn.id}')" class="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors" title="Editar">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function refreshButtons() {
+            await fetchButtons();
+        }
+
+        function openAddButtonModal() {
+            document.getElementById('add-button-number').value = buttonsData.length + 1;
+            document.getElementById('add-gpio-pin').value = '17';
+            document.getElementById('add-button-label').value = '';
+            document.getElementById('add-button-modal').classList.remove('hidden');
+            document.getElementById('add-button-modal').classList.add('flex');
+        }
+
+        function closeAddButtonModal() {
+            document.getElementById('add-button-modal').classList.add('hidden');
+            document.getElementById('add-button-modal').classList.remove('flex');
+        }
+
+        async function createButton() {
+            const buttonNumber = parseInt(document.getElementById('add-button-number').value);
+            const gpioPin = parseInt(document.getElementById('add-gpio-pin').value);
+            const label = document.getElementById('add-button-label').value;
+
+            try {
+                const response = await fetch('/admin/buttons', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        button_number: buttonNumber,
+                        gpio_pin: gpioPin,
+                        label: label,
+                        is_active: true
+                    })
+                });
+
+                if (response.ok) {
+                    closeAddButtonModal();
+                    await fetchButtons();
+                } else {
+                    const data = await response.json();
+                    alert(data.error || 'Erro ao criar botao');
+                }
+            } catch (error) {
+                console.error('Error creating button:', error);
+                alert('Erro ao criar botao');
+            }
+        }
+
+        function openEditButtonModal(buttonId) {
+            const btn = buttonsData.find(b => b.id === buttonId);
+            if (!btn) return;
+
+            document.getElementById('edit-button-id').value = btn.id;
+            document.getElementById('edit-button-number').value = btn.button_number;
+            document.getElementById('edit-gpio-pin').value = btn.gpio_pin;
+            document.getElementById('edit-button-label').value = btn.label || '';
+
+            editButtonActive = btn.is_active;
+            updateEditActiveToggle();
+
+            document.getElementById('edit-button-modal').classList.remove('hidden');
+            document.getElementById('edit-button-modal').classList.add('flex');
+        }
+
+        function closeEditButtonModal() {
+            document.getElementById('edit-button-modal').classList.add('hidden');
+            document.getElementById('edit-button-modal').classList.remove('flex');
+        }
+
+        function toggleEditActive() {
+            editButtonActive = !editButtonActive;
+            updateEditActiveToggle();
+        }
+
+        function updateEditActiveToggle() {
+            const toggle = document.getElementById('edit-button-active');
+            const knob = toggle.querySelector('span');
+
+            if (editButtonActive) {
+                toggle.classList.remove('bg-gray-700');
+                toggle.classList.add('bg-primary-500');
+                knob.classList.remove('translate-x-0');
+                knob.classList.add('translate-x-5');
+            } else {
+                toggle.classList.add('bg-gray-700');
+                toggle.classList.remove('bg-primary-500');
+                knob.classList.add('translate-x-0');
+                knob.classList.remove('translate-x-5');
+            }
+        }
+
+        async function updateButton() {
+            const buttonId = document.getElementById('edit-button-id').value;
+            const gpioPin = parseInt(document.getElementById('edit-gpio-pin').value);
+            const label = document.getElementById('edit-button-label').value;
+
+            try {
+                const response = await fetch(`/admin/buttons/${buttonId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        gpio_pin: gpioPin,
+                        label: label,
+                        is_active: editButtonActive
+                    })
+                });
+
+                if (response.ok) {
+                    closeEditButtonModal();
+                    await fetchButtons();
+                } else {
+                    const data = await response.json();
+                    alert(data.error || 'Erro ao atualizar botao');
+                }
+            } catch (error) {
+                console.error('Error updating button:', error);
+                alert('Erro ao atualizar botao');
+            }
+        }
+
+        async function deleteButton() {
+            const buttonId = document.getElementById('edit-button-id').value;
+
+            if (!confirm('Tem certeza que deseja excluir este botao?')) return;
+
+            try {
+                const response = await fetch(`/admin/buttons/${buttonId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok || response.status === 204) {
+                    closeEditButtonModal();
+                    await fetchButtons();
+                } else {
+                    const data = await response.json();
+                    alert(data.error || 'Erro ao excluir botao');
+                }
+            } catch (error) {
+                console.error('Error deleting button:', error);
+                alert('Erro ao excluir botao');
+            }
+        }
+
         async function refreshData() {
-            await Promise.all([fetchStatus(), fetchSystem(), fetchCameras(), fetchDeviceInfo()]);
+            await Promise.all([fetchStatus(), fetchSystem(), fetchCameras(), fetchDeviceInfo(), fetchButtons()]);
         }
 
         // Initial load

@@ -14,11 +14,15 @@ import os
 from pathlib import Path
 from typing import Optional
 
+import aiohttp
 from aiohttp import web
 
 from ..streaming import StreamManager
 
 logger = logging.getLogger(__name__)
+
+# Type hint for GPIO handler (optional dependency)
+GPIOButtonHandler = None
 
 # Static files directory
 STATIC_DIR = Path(__file__).parent / "static"
@@ -36,6 +40,7 @@ class DeviceHTTPServer:
         port: int = 8080,
         stream_manager: Optional[StreamManager] = None,
         device_token: Optional[str] = None,
+        gpio_handler: Optional["GPIOButtonHandler"] = None,
     ):
         self.host = host
         self.port = port
@@ -43,7 +48,9 @@ class DeviceHTTPServer:
         self.runner: web.AppRunner | None = None
         self.device_id = os.getenv("DEVICE_ID", "unknown")
         self.device_token = device_token or os.getenv("DEVICE_TOKEN", "")
+        self.backend_url = os.getenv("BACKEND_URL", "").rstrip("/")
         self.stream_manager = stream_manager
+        self.gpio_handler = gpio_handler
         self._setup_routes()
 
     def _setup_routes(self) -> None:
@@ -67,6 +74,12 @@ class DeviceHTTPServer:
         self.app.router.add_post("/admin/streams/{camera_id}/start", self.handle_stream_start)
         self.app.router.add_post("/admin/streams/{camera_id}/stop", self.handle_stream_stop)
         self.app.router.add_get("/admin/streams/{camera_id}/status", self.handle_stream_status)
+
+        # GPIO Buttons management (protected by Cloudflare)
+        self.app.router.add_get("/admin/buttons", self.handle_buttons_list)
+        self.app.router.add_post("/admin/buttons", self.handle_button_create)
+        self.app.router.add_patch("/admin/buttons/{button_id}", self.handle_button_update)
+        self.app.router.add_delete("/admin/buttons/{button_id}", self.handle_button_delete)
 
         # HLS streaming (public - security handled by Cloudflare Snippet)
         self.app.router.add_get("/hls/{camera_id}/{filename}", self.handle_hls_file)
@@ -535,3 +548,178 @@ class DeviceHTTPServer:
             "error_message": stream_info.error_message,
             "is_active": stream_info.is_active,
         })
+
+    # ==================== GPIO Buttons Handlers ====================
+
+    def _get_auth_headers(self) -> dict:
+        """Get authentication headers for backend API."""
+        import base64
+        credentials = f"{self.device_id}:{self.device_token}"
+        encoded = base64.b64encode(credentials.encode()).decode()
+        return {
+            "Authorization": f"Basic {encoded}",
+            "Content-Type": "application/json",
+        }
+
+    async def handle_buttons_list(self, request: web.Request) -> web.Response:
+        """List all configured GPIO buttons from backend."""
+        if not self.backend_url:
+            return web.json_response(
+                {"error": "Backend URL not configured"},
+                status=503
+            )
+
+        url = f"{self.backend_url}/api/device/buttons/"
+        headers = self._get_auth_headers()
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # Add GPIO status if handler is available
+                        buttons = data.get("buttons", [])
+                        if self.gpio_handler:
+                            for btn in buttons:
+                                gpio_pin = btn.get("gpio_pin")
+                                btn["is_monitoring"] = gpio_pin in self.gpio_handler.buttons
+                        return web.json_response(data)
+                    else:
+                        error = await response.text()
+                        logger.error(f"Failed to fetch buttons: {response.status} - {error}")
+                        return web.json_response(
+                            {"error": f"Backend error: {response.status}"},
+                            status=response.status
+                        )
+        except Exception as e:
+            logger.error(f"Error fetching buttons: {e}")
+            return web.json_response(
+                {"error": str(e)},
+                status=500
+            )
+
+    async def handle_button_create(self, request: web.Request) -> web.Response:
+        """Create a new GPIO button configuration."""
+        if not self.backend_url:
+            return web.json_response(
+                {"error": "Backend URL not configured"},
+                status=503
+            )
+
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response(
+                {"error": "Invalid JSON"},
+                status=400
+            )
+
+        # Validate required fields
+        required = ["button_number", "gpio_pin"]
+        missing = [f for f in required if f not in data]
+        if missing:
+            return web.json_response(
+                {"error": f"Missing required fields: {', '.join(missing)}"},
+                status=400
+            )
+
+        url = f"{self.backend_url}/api/device/buttons/create/"
+        headers = self._get_auth_headers()
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=data) as response:
+                    result = await response.json()
+                    if response.status in (200, 201):
+                        # Refresh GPIO handler config
+                        if self.gpio_handler:
+                            await self.gpio_handler.refresh_config()
+                        return web.json_response(result, status=201)
+                    else:
+                        return web.json_response(result, status=response.status)
+        except Exception as e:
+            logger.error(f"Error creating button: {e}")
+            return web.json_response(
+                {"error": str(e)},
+                status=500
+            )
+
+    async def handle_button_update(self, request: web.Request) -> web.Response:
+        """Update a GPIO button configuration."""
+        if not self.backend_url:
+            return web.json_response(
+                {"error": "Backend URL not configured"},
+                status=503
+            )
+
+        button_id = request.match_info.get("button_id")
+        if not button_id:
+            return web.json_response(
+                {"error": "Button ID required"},
+                status=400
+            )
+
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response(
+                {"error": "Invalid JSON"},
+                status=400
+            )
+
+        url = f"{self.backend_url}/api/device/buttons/{button_id}/"
+        headers = self._get_auth_headers()
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.patch(url, headers=headers, json=data) as response:
+                    result = await response.json()
+                    if response.status == 200:
+                        # Refresh GPIO handler config
+                        if self.gpio_handler:
+                            await self.gpio_handler.refresh_config()
+                        return web.json_response(result)
+                    else:
+                        return web.json_response(result, status=response.status)
+        except Exception as e:
+            logger.error(f"Error updating button: {e}")
+            return web.json_response(
+                {"error": str(e)},
+                status=500
+            )
+
+    async def handle_button_delete(self, request: web.Request) -> web.Response:
+        """Delete a GPIO button configuration."""
+        if not self.backend_url:
+            return web.json_response(
+                {"error": "Backend URL not configured"},
+                status=503
+            )
+
+        button_id = request.match_info.get("button_id")
+        if not button_id:
+            return web.json_response(
+                {"error": "Button ID required"},
+                status=400
+            )
+
+        url = f"{self.backend_url}/api/device/buttons/{button_id}/"
+        headers = self._get_auth_headers()
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.delete(url, headers=headers) as response:
+                    if response.status == 204:
+                        # Refresh GPIO handler config
+                        if self.gpio_handler:
+                            await self.gpio_handler.refresh_config()
+                        return web.Response(status=204)
+                    else:
+                        try:
+                            result = await response.json()
+                            return web.json_response(result, status=response.status)
+                        except Exception:
+                            return web.json_response(
+                                {"error": f"Backend error: {response.status}"},
+                                status=response.status
+                            )

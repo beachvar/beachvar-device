@@ -401,6 +401,9 @@ async def main():
     else:
         logger.info("GPIO not available - running without button support")
 
+    # Pass GPIO handler to HTTP server for button management
+    http_server.gpio_handler = gpio_handler
+
     # Create gateway client
     gateway_client = GatewayClient(
         gateway_url=gateway_url,
