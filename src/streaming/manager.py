@@ -201,6 +201,7 @@ class StreamManager:
         Sync YouTube broadcasts with backend state.
         - Start new broadcasts that aren't running locally
         - Stop broadcasts that were removed from backend
+        - Clean up failed broadcast tracking when backend removes them
 
         Args:
             backend_broadcasts: List of active broadcasts from backend
@@ -216,6 +217,13 @@ class StreamManager:
 
         # Find broadcasts to stop (running locally but not in backend anymore)
         broadcasts_to_stop = local_broadcast_ids - backend_broadcast_ids
+
+        # Clean up failed broadcasts that are no longer in backend
+        # (backend marked them as ERROR, so they're not returned as active)
+        stale_failed = self._youtube_failed_broadcasts - backend_broadcast_ids
+        if stale_failed:
+            logger.info(f"Cleaning up {len(stale_failed)} failed broadcast(s) no longer in backend")
+            self._youtube_failed_broadcasts -= stale_failed
 
         # Stop broadcasts that were removed from backend
         for broadcast_id in broadcasts_to_stop:
@@ -238,6 +246,14 @@ class StreamManager:
         for broadcast_data in backend_broadcasts:
             broadcast_id = broadcast_data["id"]
             if broadcast_id not in broadcasts_to_start:
+                continue
+
+            # Skip broadcasts that recently failed (prevents restart loop)
+            if broadcast_id in self._youtube_failed_broadcasts:
+                logger.debug(
+                    f"Skipping broadcast {broadcast_id} - marked as failed, "
+                    "waiting for backend to acknowledge error status"
+                )
                 continue
 
             camera_id = broadcast_data["camera_id"]
@@ -1077,6 +1093,9 @@ class StreamManager:
 
                         logger.error(f"YouTube stream {broadcast_id} failed: {error_msg}")
 
+                        # Mark as failed BEFORE notifying backend (prevents race with sync)
+                        self._youtube_failed_broadcasts.add(broadcast_id)
+
                         # Notify backend
                         await self._update_youtube_broadcast_status(
                             broadcast_id,
@@ -1272,6 +1291,10 @@ class StreamManager:
     # Last heartbeat timestamp for each YouTube broadcast
     _youtube_last_heartbeat: dict[str, float] = {}
 
+    # Broadcasts that failed and should not be auto-restarted
+    # This prevents the sync loop from restarting broadcasts that died with errors
+    _youtube_failed_broadcasts: set[str] = set()
+
     async def start_youtube_stream(
         self,
         camera_id: str,
@@ -1355,6 +1378,9 @@ class StreamManager:
 
             # Mark as recently started so heartbeat loop doesn't send immediately
             self._youtube_last_heartbeat[broadcast_id] = time.time()
+
+            # Remove from failed set if this is a retry
+            self._youtube_failed_broadcasts.discard(broadcast_id)
 
             logger.info(f"YouTube stream started for {camera_name} (PID: {process.pid})")
 
