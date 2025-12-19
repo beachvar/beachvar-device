@@ -189,6 +189,18 @@ class StreamManager:
         # Update cameras
         camera_list = state.get("cameras", [])
         cameras = [CameraConfig.from_dict(c) for c in camera_list]
+        new_camera_ids = {c.id for c in cameras}
+        old_camera_ids = set(self._cameras.keys())
+
+        # Find cameras that were deleted from backend
+        deleted_camera_ids = old_camera_ids - new_camera_ids
+        for camera_id in deleted_camera_ids:
+            camera = self._cameras.get(camera_id)
+            camera_name = camera.name if camera else camera_id
+            logger.info(f"Camera {camera_name} ({camera_id}) removed from backend, cleaning up...")
+            await self._cleanup_deleted_camera(camera_id)
+
+        # Update camera cache with new data
         self._cameras = {c.id: c for c in cameras}
 
         # Sync YouTube broadcasts
@@ -379,6 +391,11 @@ class StreamManager:
                         camera = CameraConfig.from_dict(data)
                         self._cameras[camera.id] = camera
                         return camera
+                    elif resp.status == 404:
+                        # Camera was deleted from backend - clean up locally
+                        logger.warning(f"Camera {camera_id} not found on backend (deleted?)")
+                        await self._cleanup_deleted_camera(camera_id)
+                        return None
                     else:
                         logger.error(f"Failed to get camera {camera_id}: {resp.status}")
                         return None
@@ -908,6 +925,14 @@ class StreamManager:
                         if resp.status == 200:
                             logger.info(f"Updated status for {camera_name} to {status}")
                             return True
+                        elif resp.status == 404:
+                            # Camera was deleted from backend - clean up locally
+                            logger.warning(
+                                f"Camera {camera_name} ({camera_id}) not found on backend (deleted?). "
+                                "Cleaning up local state..."
+                            )
+                            await self._cleanup_deleted_camera(camera_id)
+                            return False
                         else:
                             error = await resp.text()
                             logger.warning(
@@ -923,6 +948,37 @@ class StreamManager:
 
         logger.error(f"Failed to update status for {camera_name} after {retries} attempts")
         return False
+
+    async def _cleanup_deleted_camera(self, camera_id: str) -> None:
+        """Clean up local state for a camera that was deleted from backend."""
+        camera = self._cameras.get(camera_id)
+        camera_name = camera.name if camera else camera_id
+
+        # Stop any active stream for this camera
+        if camera_id in self._streams:
+            stream = self._streams[camera_id]
+            if stream.is_running:
+                logger.info(f"Stopping stream for deleted camera {camera_name}")
+                try:
+                    stream.process.terminate()
+                    try:
+                        stream.process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        stream.process.kill()
+                        stream.process.wait()
+                except Exception as e:
+                    logger.error(f"Error stopping stream for deleted camera {camera_name}: {e}")
+
+            del self._streams[camera_id]
+
+        # Clean up HLS files if applicable
+        if camera and camera.is_local_hls:
+            self.cleanup_hls_files(camera_id)
+
+        # Remove from camera cache
+        if camera_id in self._cameras:
+            del self._cameras[camera_id]
+            logger.info(f"Removed deleted camera {camera_name} ({camera_id}) from cache")
 
     # ==================== Monitoring ====================
 
