@@ -1,33 +1,29 @@
 # --- Build stage ---
-FROM python:3.12-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
 # Copy dependency files
-COPY pyproject.toml uv.lock* ./
+COPY pyproject.toml uv.lock ./
 
-# Create virtual environment and install dependencies
-RUN uv venv /app/.venv && uv sync --frozen --no-dev --no-install-project
+# Install dependencies in virtual environment
+RUN uv sync --frozen --no-dev
 
 # --- Final stage ---
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
 # Set timezone to Brazil
 ENV TZ=America/Sao_Paulo
 
-# Install only runtime dependencies (smaller image)
+# Install only runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     tzdata \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
@@ -38,6 +34,7 @@ COPY main.py .
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 ENV PATH="/app/.venv/bin:$PATH"
 
 CMD ["python", "main.py"]
