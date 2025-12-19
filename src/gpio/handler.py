@@ -154,7 +154,7 @@ class GPIOButtonHandler:
 
     async def _fetch_button_config(self) -> None:
         """Fetch button configuration from backend."""
-        url = f"{self.backend_url}/api/device/buttons/"
+        url = f"{self.backend_url}/api/v1/device/buttons/"
         headers = self._get_auth_headers()
 
         try:
@@ -272,7 +272,7 @@ class GPIOButtonHandler:
 
     async def _send_button_press(self, button_number: int) -> None:
         """Send button press event to backend."""
-        url = f"{self.backend_url}/api/device/buttons/{button_number}/press/"
+        url = f"{self.backend_url}/api/v1/device/buttons/{button_number}/press/"
         headers = self._get_auth_headers()
 
         try:

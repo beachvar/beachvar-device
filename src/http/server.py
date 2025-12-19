@@ -569,7 +569,7 @@ class DeviceHTTPServer:
                 status=503
             )
 
-        url = f"{self.backend_url}/api/device/buttons/"
+        url = f"{self.backend_url}/api/v1/device/buttons/"
         headers = self._get_auth_headers()
 
         try:
@@ -623,7 +623,7 @@ class DeviceHTTPServer:
                 status=400
             )
 
-        url = f"{self.backend_url}/api/device/buttons/create/"
+        url = f"{self.backend_url}/api/v1/device/buttons/create/"
         headers = self._get_auth_headers()
 
         try:
@@ -667,7 +667,7 @@ class DeviceHTTPServer:
                 status=400
             )
 
-        url = f"{self.backend_url}/api/device/buttons/{button_id}/"
+        url = f"{self.backend_url}/api/v1/device/buttons/{button_id}/"
         headers = self._get_auth_headers()
 
         try:
@@ -703,7 +703,7 @@ class DeviceHTTPServer:
                 status=400
             )
 
-        url = f"{self.backend_url}/api/device/buttons/{button_id}/"
+        url = f"{self.backend_url}/api/v1/device/buttons/{button_id}/"
         headers = self._get_auth_headers()
 
         try:
