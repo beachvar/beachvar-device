@@ -615,7 +615,12 @@ class StreamManager:
         URL encode password in RTSP URL to handle special characters.
 
         Handles URLs like: rtsp://user:pass!word@host:port/path
+
+        If password is already URL-encoded (contains %XX patterns), it's
+        first decoded to avoid double-encoding.
         """
+        from urllib.parse import unquote
+
         # Parse the URL
         match = re.match(
             r'^(rtsp://)?([^:]+):([^@]+)@(.+)$',
@@ -628,8 +633,12 @@ class StreamManager:
             password = match.group(3)
             rest = match.group(4)
 
+            # Decode first to handle already-encoded passwords (avoid double-encoding)
+            # e.g., %21 -> ! -> %21 (instead of %21 -> %2521)
+            decoded_password = unquote(password)
+
             # URL encode the password
-            encoded_password = quote(password, safe='')
+            encoded_password = quote(decoded_password, safe='')
 
             return f"{scheme}{user}:{encoded_password}@{rest}"
 
