@@ -255,9 +255,14 @@ class GPIOButtonHandler:
                         data = await response.json()
                         action = data.get("action")
                         if action:
+                            # Action is executed asynchronously by backend
+                            action_type = action.get("type", "unknown")
+                            court = action.get("court")
+                            camera = action.get("camera")
+                            target = court or camera or ""
                             logger.info(
-                                f"Button {button_number} -> {action.get('type')}: "
-                                f"{action.get('result', {}).get('success', 'unknown')}"
+                                f"Button {button_number} -> {action_type}"
+                                f"{f' ({target})' if target else ''} - sent to backend"
                             )
                         else:
                             logger.info(f"Button {button_number} pressed - no action configured")
