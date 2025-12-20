@@ -1,15 +1,15 @@
 """
 Litestar application setup for device HTTP server.
+
+Note: The admin frontend is served by Cloudflare Pages at /admin/.
+This server only handles API endpoints and HLS streaming.
 """
 
 import logging
-from pathlib import Path
 
 from litestar import Litestar, get
 from litestar.config.cors import CORSConfig
 from litestar.di import Provide
-from litestar.response import Redirect, Response
-from litestar.static_files import StaticFilesConfig
 
 from .routes import (
     AdminController,
@@ -22,9 +22,6 @@ from .routes import (
 from ..streaming import StreamManager
 
 logger = logging.getLogger(__name__)
-
-# Static files directory (Vue.js build output)
-STATIC_DIR = Path(__file__).parent / "static"
 
 
 def create_app(
@@ -49,36 +46,7 @@ def create_app(
     async def health_check() -> dict:
         return {"status": "ok"}
 
-    # Serve frontend index
-    @get("/", exclude_from_auth=True)
-    async def root_redirect() -> Redirect:
-        return Redirect(path="/admin/")
-
-    @get("/admin/", exclude_from_auth=True)
-    async def admin_index() -> Response:
-        index_file = STATIC_DIR / "index.html"
-        if index_file.exists():
-            content = index_file.read_text()
-            return Response(content=content, media_type="text/html")
-        # Return empty response if no frontend built yet
-        return Response(
-            content="<html><body><h1>Admin not built</h1></body></html>",
-            media_type="text/html",
-        )
-
-    # Static files config for frontend assets
-    static_files_config = []
-    assets_dir = STATIC_DIR / "assets"
-    if assets_dir.exists():
-        static_files_config.append(
-            StaticFilesConfig(
-                directories=[assets_dir],
-                path="/admin/assets",
-                name="static",
-            )
-        )
-
-    # CORS config for development
+    # CORS config for Cloudflare frontend
     cors_config = CORSConfig(
         allow_origins=["*"],
         allow_methods=["*"],
@@ -88,8 +56,6 @@ def create_app(
     app = Litestar(
         route_handlers=[
             health_check,
-            root_redirect,
-            admin_index,
             AdminController,
             CamerasController,
             StreamsController,
@@ -100,7 +66,6 @@ def create_app(
         dependencies={
             "stream_manager": Provide(provide_stream_manager),
         },
-        static_files_config=static_files_config,
         cors_config=cors_config,
         debug=False,
     )

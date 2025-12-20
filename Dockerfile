@@ -1,21 +1,4 @@
-# --- Stage 1: Build Vue.js frontend ---
-FROM node:20-alpine AS frontend-builder
-
-WORKDIR /app
-
-# Copy package files
-COPY admin-frontend/package*.json ./
-
-# Install dependencies
-RUN npm install
-
-# Copy source code
-COPY admin-frontend/ ./
-
-# Build production bundle
-RUN npm run build
-
-# --- Stage 2: Build Python dependencies ---
+# --- Stage 1: Build Python dependencies ---
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python-builder
 
 # Install build dependencies for lgpio
@@ -45,7 +28,7 @@ RUN uv sync --frozen --no-dev
 RUN uv pip install /tmp/lg/PY_LGPIO && \
     rm -rf /tmp/lg
 
-# --- Stage 3: Final runtime image ---
+# --- Stage 2: Final runtime image ---
 FROM python:3.12-slim-bookworm
 
 WORKDIR /app
@@ -76,9 +59,6 @@ COPY --from=python-builder /app/.venv /app/.venv
 # Copy application code
 COPY src/ src/
 COPY main.py .
-
-# Copy Vue.js build output to static files directory (after src/ to overwrite)
-COPY --from=frontend-builder /app/dist /app/src/http/static
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1

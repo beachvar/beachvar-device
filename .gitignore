@@ -10,6 +10,5 @@ dist/
 build/
 .eggs/
 
-# Node
-node_modules/
-*.tsbuildinfo
+# HLS output
+hls/
