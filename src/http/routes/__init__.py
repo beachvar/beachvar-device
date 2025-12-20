@@ -6,7 +6,7 @@ from .admin import AdminController
 from .cameras import CamerasController
 from .streams import StreamsController
 from .logs import LogsController
-from .hls import HLSController
+from .hls import HLSController, APIHLSController
 from .courts import CourtsController
 
 __all__ = [
@@ -15,5 +15,6 @@ __all__ = [
     "StreamsController",
     "LogsController",
     "HLSController",
+    "APIHLSController",
     "CourtsController",
 ]

@@ -41,10 +41,11 @@ def _get_stream_data(cam, is_streaming: bool) -> dict | None:
         }
 
     # Local HLS mode: return local URL when streaming
+    # Uses /api/hls/ which is protected by Cloudflare Zero Trust (no signature needed)
     if cam.stream_mode == StreamMode.LOCAL_HLS and is_streaming:
         return {
             "live_input_id": None,
-            "playback_hls": f"/hls/{cam.id}/playlist.m3u8",
+            "playback_hls": f"/api/hls/{cam.id}/playlist.m3u8",
             "playback_dash": None,
         }
 

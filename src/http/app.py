@@ -17,6 +17,7 @@ from .routes import (
     StreamsController,
     LogsController,
     HLSController,
+    APIHLSController,
     CourtsController,
 )
 from ..streaming import StreamManager
@@ -61,6 +62,7 @@ def create_app(
             StreamsController,
             LogsController,
             HLSController,
+            APIHLSController,
             CourtsController,
         ],
         dependencies={
