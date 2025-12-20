@@ -722,9 +722,7 @@ class StreamManager:
 
             # Input options - optimized for RTSP
             "-rtsp_transport", "tcp",
-            "-stimeout", "10000000",  # 10 seconds socket timeout (microseconds)
-            "-timeout", "10000000",   # 10 seconds connection timeout (microseconds)
-            "-rw_timeout", "10000000",  # 10 seconds read/write timeout (microseconds)
+            "-timeout", "10000000",  # 10 seconds timeout for socket I/O operations (microseconds)
             "-fflags", "+genpts+discardcorrupt",
             "-flags", "low_delay",
             "-use_wallclock_as_timestamps", "1",
@@ -783,9 +781,7 @@ class StreamManager:
 
             # Input options - optimized for RTSP
             "-rtsp_transport", "tcp",
-            "-stimeout", "10000000",  # 10 seconds socket timeout (microseconds)
-            "-timeout", "10000000",   # 10 seconds connection timeout (microseconds)
-            "-rw_timeout", "10000000",  # 10 seconds read/write timeout (microseconds)
+            "-timeout", "10000000",  # 10 seconds timeout for socket I/O operations (microseconds)
             "-fflags", "+genpts+discardcorrupt",
             "-use_wallclock_as_timestamps", "1",
             "-i", rtsp_url,
