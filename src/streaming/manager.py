@@ -16,6 +16,7 @@ from urllib.parse import quote, urlparse
 import aiohttp
 
 from .camera import CameraConfig, StreamConfig, LiveStreamInfo, StreamMode
+from .logs import log_manager
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +29,12 @@ class StreamProcess:
     """Active FFmpeg stream process."""
 
     camera_id: str
+    camera_name: str
     process: subprocess.Popen
     live_stream_id: Optional[str] = None
     started_at: Optional[str] = None
     started_timestamp: float = field(default_factory=time.time)
+    log_reader_task: Optional[asyncio.Task] = None
 
     @property
     def is_running(self) -> bool:
@@ -403,6 +406,31 @@ class StreamManager:
             logger.error(f"Error getting camera {camera_id}: {e}")
             return None
 
+    async def update_camera(
+        self, camera_id: str, update_data: dict
+    ) -> Optional[CameraConfig]:
+        """Update a camera on backend."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.backend_url}/api/v1/device/cameras/{camera_id}/"
+                async with session.put(
+                    url, headers=self._get_headers(), json=update_data
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        camera = self._parse_camera(data)
+                        if camera:
+                            self._cameras[camera.id] = camera
+                            logger.info(f"Updated camera: {camera.name} ({camera.id})")
+                        return camera
+                    else:
+                        error = await resp.text()
+                        logger.error(f"Failed to update camera {camera_id}: {resp.status} - {error}")
+                        return None
+        except Exception as e:
+            logger.error(f"Error updating camera {camera_id}: {e}")
+            return None
+
     async def delete_camera(self, camera_id: str) -> bool:
         """Delete a camera from backend."""
         # First stop any active stream
@@ -472,11 +500,24 @@ class StreamManager:
             logger.info(f"Starting FFmpeg for {camera.name}...")
             process = self._start_ffmpeg(camera)
 
+            # Initialize log manager for this camera
+            await log_manager.init_camera(camera_id, camera.name)
+            await log_manager.add_log(
+                camera_id, f"FFmpeg started (PID: {process.pid})", "info", camera.name
+            )
+
+            # Start log reader task
+            log_reader_task = asyncio.create_task(
+                self._read_ffmpeg_logs(camera_id, camera.name, process)
+            )
+
             self._streams[camera_id] = StreamProcess(
                 camera_id=camera_id,
+                camera_name=camera.name,
                 process=process,
                 live_stream_id=live_stream_info.id,
                 started_at=live_stream_info.started_at,
+                log_reader_task=log_reader_task,
             )
 
             logger.info(f"FFmpeg started for {camera.name} (PID: {process.pid})")
@@ -527,6 +568,14 @@ class StreamManager:
 
         # Stop FFmpeg process gracefully (same pattern as stream.py)
         try:
+            # Cancel log reader task first
+            if stream.log_reader_task and not stream.log_reader_task.done():
+                stream.log_reader_task.cancel()
+                try:
+                    await asyncio.wait_for(stream.log_reader_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
             if stream.is_running:
                 # Use terminate() first (SIGTERM) - cleaner than SIGINT
                 stream.process.terminate()
@@ -541,6 +590,11 @@ class StreamManager:
                         stream.process.wait()
                     except Exception:
                         pass
+
+            # Log the stop event
+            await log_manager.add_log(
+                camera_id, "Stream stopped by user", "info", stream.camera_name
+            )
 
             logger.info(f"Stopped stream for camera {camera_id}")
 
@@ -702,7 +756,7 @@ class StreamManager:
         logger.info(f"Starting FFmpeg for camera {camera.name}: {rtsp_url} -> {protocol}")
         logger.debug(f"FFmpeg command: {' '.join(cmd)}")
 
-        # Start FFmpeg as subprocess with stderr captured
+        # Start FFmpeg as subprocess with stderr captured for logging
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
@@ -710,6 +764,65 @@ class StreamManager:
         )
 
         return process
+
+    async def _read_ffmpeg_logs(
+        self,
+        camera_id: str,
+        camera_name: str,
+        process: subprocess.Popen
+    ) -> None:
+        """
+        Read FFmpeg stderr output asynchronously and store in log manager.
+
+        This runs in background and captures all FFmpeg output for debugging.
+        """
+        loop = asyncio.get_event_loop()
+
+        try:
+            while process.poll() is None:
+                # Read stderr in thread to avoid blocking
+                line = await loop.run_in_executor(
+                    None,
+                    lambda: process.stderr.readline() if process.stderr else b""
+                )
+
+                if not line:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                try:
+                    text = line.decode("utf-8", errors="ignore").strip()
+                    if text:
+                        # Determine log level based on content
+                        level = "error" if any(
+                            x in text.lower() for x in ["error", "fatal", "failed"]
+                        ) else "warning" if "warning" in text.lower() else "info"
+
+                        await log_manager.add_log(camera_id, text, level, camera_name)
+                except Exception:
+                    pass
+
+            # Process ended - read any remaining output
+            if process.stderr:
+                remaining = process.stderr.read()
+                if remaining:
+                    for line in remaining.decode("utf-8", errors="ignore").strip().split("\n"):
+                        if line:
+                            await log_manager.add_log(camera_id, line, "info", camera_name)
+
+            # Log exit code
+            exit_code = process.returncode
+            await log_manager.add_log(
+                camera_id,
+                f"FFmpeg exited with code {exit_code}",
+                "error" if exit_code != 0 else "info",
+                camera_name
+            )
+
+        except asyncio.CancelledError:
+            await log_manager.add_log(camera_id, "Log reader cancelled", "info", camera_name)
+        except Exception as e:
+            logger.error(f"Error reading FFmpeg logs for {camera_name}: {e}")
 
     def _build_rtmps_ffmpeg_cmd(self, camera: CameraConfig, rtsp_url: str) -> list[str]:
         """Build FFmpeg command for RTMPS output (Cloudflare Stream)."""

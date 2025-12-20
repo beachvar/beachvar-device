@@ -19,9 +19,11 @@ from pathlib import Path
 import uvloop
 from dotenv import load_dotenv
 
+import uvicorn
+
 from src.gateway import GatewayClient
 from src.gpio import GPIOButtonHandler
-from src.http import DeviceHTTPServer
+from src.http import create_app
 from src.streaming import StreamManager
 
 # Load environment variables
@@ -35,7 +37,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Global instances for signal handling
-http_server: DeviceHTTPServer | None = None
+http_server: uvicorn.Server | None = None
+http_server_task: asyncio.Task | None = None
 gateway_client: GatewayClient | None = None
 stream_manager: StreamManager | None = None
 gpio_handler: GPIOButtonHandler | None = None
@@ -372,23 +375,6 @@ async def main():
     )
     await stream_manager.start()
 
-    # Start HTTP server (serves HLS streams and admin panel)
-    # Use 0.0.0.0 to allow access from external containers and within Docker
-    http_server = DeviceHTTPServer(
-        host="0.0.0.0",
-        port=http_port,
-        stream_manager=stream_manager,
-        device_token=device_token,
-    )
-    await http_server.start()
-
-    # Auto-start streams for registered cameras
-    await auto_start_streams()
-
-    # Recover active YouTube broadcasts (after HLS streams are started)
-    if stream_manager:
-        await stream_manager.recover_youtube_broadcasts()
-
     # Initialize GPIO button handler (only works on Raspberry Pi)
     gpio_handler = GPIOButtonHandler(
         backend_url=backend_url,
@@ -401,8 +387,32 @@ async def main():
     else:
         logger.info("GPIO not available - running without button support")
 
-    # Pass GPIO handler to HTTP server for button management
-    http_server.gpio_handler = gpio_handler
+    # Create Litestar app and start HTTP server
+    app = create_app(
+        stream_manager=stream_manager,
+        gpio_handler=gpio_handler,
+    )
+
+    config = uvicorn.Config(
+        app=app,
+        host="0.0.0.0",
+        port=http_port,
+        log_level="info",
+        access_log=False,
+    )
+    http_server = uvicorn.Server(config)
+
+    # Start server in background task
+    global http_server_task
+    http_server_task = asyncio.create_task(http_server.serve())
+    logger.info(f"HTTP server started on http://0.0.0.0:{http_port}")
+
+    # Auto-start streams for registered cameras
+    await auto_start_streams()
+
+    # Recover active YouTube broadcasts (after HLS streams are started)
+    if stream_manager:
+        await stream_manager.recover_youtube_broadcasts()
 
     # Create gateway client
     gateway_client = GatewayClient(
@@ -436,7 +446,12 @@ async def main():
         if stream_manager:
             await stream_manager.stop()
         if http_server:
-            await http_server.stop()
+            http_server.should_exit = True
+            # Wait for server task to complete
+            try:
+                await asyncio.wait_for(http_server_task, timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
         if gateway_client:
             await gateway_client.disconnect()
 
