@@ -9,7 +9,7 @@ from typing import Optional
 from litestar import Litestar, get
 from litestar.config.cors import CORSConfig
 from litestar.di import Provide
-from litestar.response import Redirect, File
+from litestar.response import Redirect, Response
 from litestar.static_files import StaticFilesConfig
 
 from .routes import (
@@ -62,12 +62,12 @@ def create_app(
         return Redirect(path="/admin/")
 
     @get("/admin/", exclude_from_auth=True)
-    async def admin_index() -> File:
+    async def admin_index() -> Response:
         index_file = STATIC_DIR / "index.html"
         if index_file.exists():
-            return File(path=index_file, media_type="text/html")
+            content = index_file.read_text()
+            return Response(content=content, media_type="text/html")
         # Return empty response if no frontend built yet
-        from litestar.response import Response
         return Response(
             content="<html><body><h1>Admin not built</h1></body></html>",
             media_type="text/html",
@@ -75,10 +75,11 @@ def create_app(
 
     # Static files config for frontend assets
     static_files_config = []
-    if STATIC_DIR.exists():
+    assets_dir = STATIC_DIR / "assets"
+    if assets_dir.exists():
         static_files_config.append(
             StaticFilesConfig(
-                directories=[STATIC_DIR],
+                directories=[assets_dir],
                 path="/admin/assets",
                 name="static",
             )
