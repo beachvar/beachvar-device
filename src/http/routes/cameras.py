@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from ...streaming import StreamManager
+from ...streaming.camera import StreamMode
 
 
 class CameraCreateDTO(BaseModel):
@@ -23,6 +24,31 @@ class CameraUpdateDTO(BaseModel):
     name: Optional[str] = None
     rtsp_url: Optional[str] = None
     position: Optional[str] = None
+
+
+def _get_stream_data(cam, is_streaming: bool) -> dict | None:
+    """
+    Get stream data for a camera.
+    For Cloudflare mode: returns Cloudflare Stream URLs
+    For local_hls mode: returns local HLS URL when streaming
+    """
+    # Cloudflare mode: return stream config if available
+    if cam.stream_mode == StreamMode.CLOUDFLARE and cam.stream:
+        return {
+            "live_input_id": cam.stream.live_input_id,
+            "playback_hls": cam.stream.playback_hls,
+            "playback_dash": cam.stream.playback_dash,
+        }
+
+    # Local HLS mode: return local URL when streaming
+    if cam.stream_mode == StreamMode.LOCAL_HLS and is_streaming:
+        return {
+            "live_input_id": None,
+            "playback_hls": f"/hls/{cam.id}/playlist.m3u8",
+            "playback_dash": None,
+        }
+
+    return None
 
 
 class CamerasController(Controller):
@@ -48,11 +74,7 @@ class CamerasController(Controller):
                     "complex_name": cam.complex_name,
                     "has_stream": cam.has_stream,
                     "stream_mode": cam.stream_mode.value if cam.stream_mode else None,
-                    "stream": {
-                        "live_input_id": cam.stream.live_input_id,
-                        "playback_hls": cam.stream.playback_hls,
-                        "playback_dash": cam.stream.playback_dash,
-                    } if cam.stream else None,
+                    "stream": _get_stream_data(cam, cam.id in stream_manager.active_streams),
                     "is_streaming": cam.id in stream_manager.active_streams,
                 }
                 for cam in cameras
@@ -67,6 +89,7 @@ class CamerasController(Controller):
         if not camera:
             raise HTTPException(status_code=404, detail="Camera not found")
 
+        is_streaming = camera.id in stream_manager.active_streams
         return {
             "id": camera.id,
             "name": camera.name,
@@ -78,12 +101,8 @@ class CamerasController(Controller):
             "complex_name": camera.complex_name,
             "has_stream": camera.has_stream,
             "stream_mode": camera.stream_mode.value if camera.stream_mode else None,
-            "stream": {
-                "live_input_id": camera.stream.live_input_id,
-                "playback_hls": camera.stream.playback_hls,
-                "playback_dash": camera.stream.playback_dash,
-            } if camera.stream else None,
-            "is_streaming": camera.id in stream_manager.active_streams,
+            "stream": _get_stream_data(camera, is_streaming),
+            "is_streaming": is_streaming,
         }
 
     @post("/")
