@@ -5,6 +5,7 @@ import StatsCard from '@/components/StatsCard.vue'
 import CameraCard from '@/components/CameraCard.vue'
 import CameraModal from '@/components/CameraModal.vue'
 import CameraLogsModal from '@/components/CameraLogsModal.vue'
+import PlayerModal from '@/components/PlayerModal.vue'
 import type { SystemInfo, DeviceInfo, Camera } from '@/types'
 import { getSystemInfo, getDeviceInfo, getCameras, getCourts } from '@/api/client'
 
@@ -19,6 +20,7 @@ const online = ref(true)
 // Modals
 const showCameraModal = ref(false)
 const showCameraLogsModal = ref(false)
+const showPlayerModal = ref(false)
 const selectedCamera = ref<Camera | null>(null)
 
 // Computed
@@ -76,6 +78,11 @@ function openEditCamera(camera: Camera) {
 function openCameraLogs(camera: Camera) {
   selectedCamera.value = camera
   showCameraLogsModal.value = true
+}
+
+function openPlayer(camera: Camera) {
+  selectedCamera.value = camera
+  showPlayerModal.value = true
 }
 
 function openTerminal() {
@@ -305,6 +312,7 @@ onUnmounted(() => {
                   :camera="camera"
                   @edit="openEditCamera"
                   @logs="openCameraLogs"
+                  @watch="openPlayer"
                 />
               </div>
             </div>
@@ -332,6 +340,11 @@ onUnmounted(() => {
 
     <CameraLogsModal
       v-model:show="showCameraLogsModal"
+      :camera="selectedCamera"
+    />
+
+    <PlayerModal
+      v-model:show="showPlayerModal"
       :camera="selectedCamera"
     />
   </div>

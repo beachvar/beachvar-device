@@ -9,3 +9,7 @@ venv/
 dist/
 build/
 .eggs/
+
+# Node
+node_modules/
+*.tsbuildinfo
