@@ -5,16 +5,13 @@ import StatsCard from '@/components/StatsCard.vue'
 import CameraCard from '@/components/CameraCard.vue'
 import CameraModal from '@/components/CameraModal.vue'
 import CameraLogsModal from '@/components/CameraLogsModal.vue'
-import ButtonCard from '@/components/ButtonCard.vue'
-import ButtonModal from '@/components/ButtonModal.vue'
-import type { SystemInfo, DeviceInfo, Camera, Button } from '@/types'
-import { getSystemInfo, getDeviceInfo, getCameras, getButtons, getCourts } from '@/api/client'
+import type { SystemInfo, DeviceInfo, Camera } from '@/types'
+import { getSystemInfo, getDeviceInfo, getCameras, getCourts } from '@/api/client'
 
 // Data
 const systemInfo = ref<SystemInfo | null>(null)
 const deviceInfo = ref<DeviceInfo | null>(null)
 const cameras = ref<Camera[]>([])
-const buttons = ref<Button[]>([])
 const courts = ref<{ id: string; name: string }[]>([])
 const loading = ref(true)
 const online = ref(true)
@@ -22,9 +19,7 @@ const online = ref(true)
 // Modals
 const showCameraModal = ref(false)
 const showCameraLogsModal = ref(false)
-const showButtonModal = ref(false)
 const selectedCamera = ref<Camera | null>(null)
-const selectedButton = ref<Button | null>(null)
 
 // Computed
 const activeStreamsCount = computed(() => cameras.value.filter(c => c.is_streaming).length)
@@ -46,27 +41,18 @@ const courtOptions = computed(() => {
   return courts.value.map(c => ({ label: c.name, value: c.id }))
 })
 
-const nextButtonNumber = computed(() => {
-  const numbers = buttons.value.map(b => b.button_number)
-  let next = 1
-  while (numbers.includes(next)) next++
-  return next
-})
-
 // Methods
 async function fetchData() {
   try {
-    const [system, device, camsData, btnsData, courtsData] = await Promise.all([
+    const [system, device, camsData, courtsData] = await Promise.all([
       getSystemInfo(),
       getDeviceInfo(),
       getCameras(),
-      getButtons(),
       getCourts(),
     ])
     systemInfo.value = system
     deviceInfo.value = device
     cameras.value = camsData.cameras
-    buttons.value = btnsData.buttons
     courts.value = courtsData.courts
     online.value = true
   } catch (error) {
@@ -90,16 +76,6 @@ function openEditCamera(camera: Camera) {
 function openCameraLogs(camera: Camera) {
   selectedCamera.value = camera
   showCameraLogsModal.value = true
-}
-
-function openAddButton() {
-  selectedButton.value = null
-  showButtonModal.value = true
-}
-
-function openEditButton(button: Button) {
-  selectedButton.value = button
-  showButtonModal.value = true
 }
 
 function openTerminal() {
@@ -334,63 +310,6 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- GPIO Buttons Section -->
-          <div class="mb-6">
-            <div class="bg-dark-900 rounded-xl border border-gray-800 overflow-hidden">
-              <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
-                <div class="flex items-center gap-3">
-                  <div class="w-10 h-10 rounded-lg bg-rose-500/10 flex items-center justify-center">
-                    <svg
-                      class="w-5 h-5 text-rose-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
-                      />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 class="font-semibold">Botoes GPIO</h3>
-                    <p class="text-sm text-gray-500">{{ buttons.length }} configurados</p>
-                  </div>
-                </div>
-                <div class="flex items-center gap-2">
-                  <NButton size="small" @click="openAddButton">
-                    <template #icon>
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-                        />
-                      </svg>
-                    </template>
-                  </NButton>
-                </div>
-              </div>
-              <div class="divide-y divide-gray-800">
-                <NEmpty
-                  v-if="buttons.length === 0"
-                  description="Nenhum botao configurado"
-                  class="py-8"
-                />
-                <ButtonCard
-                  v-else
-                  v-for="button in buttons"
-                  :key="button.id"
-                  :button="button"
-                  @edit="openEditButton"
-                />
-              </div>
-            </div>
-          </div>
-
           <!-- Footer -->
           <footer class="mt-8 text-center text-sm text-gray-600">
             <p>
@@ -414,14 +333,6 @@ onUnmounted(() => {
     <CameraLogsModal
       v-model:show="showCameraLogsModal"
       :camera="selectedCamera"
-    />
-
-    <ButtonModal
-      v-model:show="showButtonModal"
-      :button="selectedButton"
-      :next-number="nextButtonNumber"
-      @saved="fetchData"
-      @deleted="fetchData"
     />
   </div>
 </template>

@@ -4,7 +4,6 @@ Litestar application setup for device HTTP server.
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from litestar import Litestar, get
 from litestar.config.cors import CORSConfig
@@ -16,7 +15,6 @@ from .routes import (
     AdminController,
     CamerasController,
     StreamsController,
-    ButtonsController,
     LogsController,
     HLSController,
     CourtsController,
@@ -31,14 +29,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 def create_app(
     stream_manager: StreamManager,
-    gpio_handler: Optional[object] = None,
 ) -> Litestar:
     """
     Create and configure the Litestar application.
 
     Args:
         stream_manager: StreamManager instance for camera/stream operations
-        gpio_handler: Optional GPIO button handler
 
     Returns:
         Configured Litestar application
@@ -47,9 +43,6 @@ def create_app(
     # Dependency providers
     async def provide_stream_manager() -> StreamManager:
         return stream_manager
-
-    async def provide_gpio_handler() -> Optional[object]:
-        return gpio_handler
 
     # Health check endpoint (outside controllers)
     @get("/health", exclude_from_auth=True)
@@ -100,14 +93,12 @@ def create_app(
             AdminController,
             CamerasController,
             StreamsController,
-            ButtonsController,
             LogsController,
             HLSController,
             CourtsController,
         ],
         dependencies={
             "stream_manager": Provide(provide_stream_manager),
-            "gpio_handler": Provide(provide_gpio_handler),
         },
         static_files_config=static_files_config,
         cors_config=cors_config,

@@ -22,7 +22,6 @@ from dotenv import load_dotenv
 import uvicorn
 
 from src.gateway import GatewayClient
-from src.gpio import GPIOButtonHandler
 from src.http import create_app
 from src.streaming import StreamManager
 
@@ -41,7 +40,6 @@ http_server: uvicorn.Server | None = None
 http_server_task: asyncio.Task | None = None
 gateway_client: GatewayClient | None = None
 stream_manager: StreamManager | None = None
-gpio_handler: GPIOButtonHandler | None = None
 
 
 # Command handlers for gateway commands
@@ -315,22 +313,9 @@ async def auto_start_streams() -> None:
     logger.info("=" * 50)
 
 
-async def handle_refresh_buttons(params: dict) -> dict:
-    """Refresh button configuration from backend."""
-    global gpio_handler
-    if not gpio_handler:
-        return {"success": False, "error": "GPIO handler not initialized"}
-
-    await gpio_handler.refresh_config()
-    return {
-        "success": True,
-        "buttons": len(gpio_handler.buttons),
-    }
-
-
 async def main():
     """Main entry point."""
-    global http_server, gateway_client, stream_manager, gpio_handler
+    global http_server, gateway_client, stream_manager
 
     # Get configuration from environment
     gateway_url = os.getenv('GATEWAY_URL')
@@ -375,22 +360,9 @@ async def main():
     )
     await stream_manager.start()
 
-    # Initialize GPIO button handler (only works on Raspberry Pi)
-    gpio_handler = GPIOButtonHandler(
-        backend_url=backend_url,
-        device_id=device_id,
-        device_token=device_token,
-    )
-    gpio_available = await gpio_handler.start()
-    if gpio_available:
-        logger.info("GPIO button handler started")
-    else:
-        logger.info("GPIO not available - running without button support")
-
     # Create Litestar app and start HTTP server
     app = create_app(
         stream_manager=stream_manager,
-        gpio_handler=gpio_handler,
     )
 
     config = uvicorn.Config(
@@ -432,7 +404,6 @@ async def main():
     gateway_client.register_command_handler('camera_updated', handle_camera_updated)
     gateway_client.register_command_handler('start_youtube_stream', handle_start_youtube_stream)
     gateway_client.register_command_handler('stop_youtube_stream', handle_stop_youtube_stream)
-    gateway_client.register_command_handler('refresh_buttons', handle_refresh_buttons)
 
     # Connect and run
     try:
@@ -441,8 +412,6 @@ async def main():
         logger.info("Shutting down...")
     finally:
         # Cleanup
-        if gpio_handler:
-            await gpio_handler.stop()
         if stream_manager:
             await stream_manager.stop()
         if http_server:

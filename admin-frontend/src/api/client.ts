@@ -5,9 +5,6 @@ import type {
   Camera,
   CameraCreateDTO,
   CameraUpdateDTO,
-  Button,
-  ButtonCreateDTO,
-  ButtonUpdateDTO,
   LogEntry,
 } from '@/types'
 
@@ -63,26 +60,6 @@ export async function startStream(cameraId: string): Promise<void> {
 
 export async function stopStream(cameraId: string): Promise<void> {
   await api.post(`/streams/${cameraId}/stop`)
-}
-
-// Buttons
-export async function getButtons(): Promise<{ buttons: Button[] }> {
-  const { data } = await api.get<{ buttons: Button[] }>('/buttons/')
-  return data
-}
-
-export async function createButton(button: ButtonCreateDTO): Promise<Button> {
-  const { data } = await api.post<Button>('/buttons/', button)
-  return data
-}
-
-export async function updateButton(id: string, button: ButtonUpdateDTO): Promise<Button> {
-  const { data } = await api.patch<Button>(`/buttons/${id}`, button)
-  return data
-}
-
-export async function deleteButton(id: string): Promise<void> {
-  await api.delete(`/buttons/${id}`)
 }
 
 // Logs

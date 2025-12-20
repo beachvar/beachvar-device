@@ -59,28 +59,6 @@ export interface CameraUpdateDTO {
   position?: string
 }
 
-export interface Button {
-  id: string
-  button_number: number
-  gpio_pin: number
-  label: string
-  is_active: boolean
-  is_monitoring?: boolean
-}
-
-export interface ButtonCreateDTO {
-  button_number: number
-  gpio_pin: number
-  label: string
-  is_active: boolean
-}
-
-export interface ButtonUpdateDTO {
-  gpio_pin?: number
-  label?: string
-  is_active?: boolean
-}
-
 export interface LogEntry {
   timestamp: string
   message: string

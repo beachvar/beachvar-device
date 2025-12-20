@@ -371,7 +371,9 @@ class StreamManager:
                 ) as resp:
                     if resp.status == 201:
                         data = await resp.json()
-                        camera = CameraConfig.from_dict(data)
+                        # Backend returns {"success": true, "camera": {...}}
+                        camera_data = data.get("camera", data)
+                        camera = CameraConfig.from_dict(camera_data)
                         self._cameras[camera.id] = camera
                         logger.info(f"Created camera: {camera.name} ({camera.id})")
                         return camera
