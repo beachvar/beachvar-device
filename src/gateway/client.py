@@ -319,29 +319,6 @@ class GatewayClient:
 
         await self.websocket.send(json.dumps(message))
 
-    async def send_stream_status(self, camera_id: str, status: str, error: Optional[str] = None):
-        """
-        Report stream status to the gateway.
-
-        Args:
-            camera_id: Camera identifier
-            status: 'started', 'stopped', or 'error'
-            error: Error message if status is 'error'
-        """
-        if not self.websocket or not self.authenticated:
-            return
-
-        message = {
-            'type': 'stream_status',
-            'payload': {
-                'cameraId': camera_id,
-                'status': status,
-                'error': error,
-            }
-        }
-
-        await self.websocket.send(json.dumps(message))
-
 
 async def main():
     """Example usage."""

@@ -73,7 +73,6 @@ class DeviceHTTPServer:
         self.app.router.add_get("/admin/streams", self.handle_streams_list)
         self.app.router.add_post("/admin/streams/{camera_id}/start", self.handle_stream_start)
         self.app.router.add_post("/admin/streams/{camera_id}/stop", self.handle_stream_stop)
-        self.app.router.add_get("/admin/streams/{camera_id}/status", self.handle_stream_status)
 
         # GPIO Buttons management (protected by Cloudflare)
         self.app.router.add_get("/admin/buttons", self.handle_buttons_list)
@@ -391,13 +390,7 @@ class DeviceHTTPServer:
             "court_name": camera.court_name,
             "complex_id": camera.complex_id,
             "complex_name": camera.complex_name,
-            "has_stream": camera.has_stream,
-            "stream": {
-                "live_input_id": camera.stream.live_input_id,
-                "rtmps_url": camera.stream.rtmps_url,
-                "playback_hls": camera.stream.playback_hls,
-                "playback_dash": camera.stream.playback_dash,
-            } if camera.stream else None,
+            "has_stream_config": camera.has_stream_config,
         }, status=201)
 
     async def handle_delete_camera(self, request: web.Request) -> web.Response:
@@ -434,25 +427,21 @@ class DeviceHTTPServer:
                 status=503
             )
 
-        streams = await self.stream_manager.get_all_streams()
+        # Get active streams from stream manager
+        active_streams = self.stream_manager.get_active_streams()
 
         return web.json_response({
             "streams": [
                 {
-                    "id": s.id,
-                    "status": s.status,
-                    "started_at": s.started_at,
-                    "stopped_at": s.stopped_at,
-                    "duration_seconds": s.duration_seconds,
-                    "bitrate_kbps": s.bitrate_kbps,
-                    "viewers_count": s.viewers_count,
-                    "error_message": s.error_message,
-                    "is_active": s.is_active,
+                    "camera_id": stream.camera_id,
+                    "camera_name": stream.camera_name,
+                    "is_running": stream.is_running,
+                    "started_at": stream.started_at,
                 }
-                for s in streams
+                for stream in active_streams
             ],
-            "total": len(streams),
-            "active_count": sum(1 for s in streams if s.is_active),
+            "total": len(active_streams),
+            "active_count": sum(1 for s in active_streams if s.is_running),
         })
 
     async def handle_stream_start(self, request: web.Request) -> web.Response:
@@ -470,17 +459,15 @@ class DeviceHTTPServer:
                 status=400
             )
 
-        stream_info = await self.stream_manager.start_stream(camera_id)
-        if not stream_info:
+        success = await self.stream_manager.start_stream(camera_id)
+        if not success:
             return web.json_response(
                 {"error": "Failed to start stream"},
                 status=500
             )
 
         return web.json_response({
-            "id": stream_info.id,
-            "status": stream_info.status,
-            "started_at": stream_info.started_at,
+            "camera_id": camera_id,
             "message": "Stream started successfully",
         })
 
@@ -508,40 +495,6 @@ class DeviceHTTPServer:
 
         return web.json_response({
             "message": "Stream stopped successfully",
-        })
-
-    async def handle_stream_status(self, request: web.Request) -> web.Response:
-        """Get stream status for a camera."""
-        if not self.stream_manager:
-            return web.json_response(
-                {"error": "Stream manager not configured"},
-                status=503
-            )
-
-        camera_id = request.match_info.get("camera_id")
-        if not camera_id:
-            return web.json_response(
-                {"error": "Camera ID required"},
-                status=400
-            )
-
-        stream_info = await self.stream_manager.get_stream_status(camera_id)
-        if not stream_info:
-            return web.json_response({
-                "status": "idle",
-                "message": "No active stream",
-            })
-
-        return web.json_response({
-            "id": stream_info.id,
-            "status": stream_info.status,
-            "started_at": stream_info.started_at,
-            "stopped_at": stream_info.stopped_at,
-            "duration_seconds": stream_info.duration_seconds,
-            "bitrate_kbps": stream_info.bitrate_kbps,
-            "viewers_count": stream_info.viewers_count,
-            "error_message": stream_info.error_message,
-            "is_active": stream_info.is_active,
         })
 
     # ==================== GPIO Buttons Handlers ====================

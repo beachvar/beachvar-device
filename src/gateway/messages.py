@@ -23,11 +23,6 @@ class CamerasMessage(BaseModel):
     payload: dict  # Contains cameras list
 
 
-class StreamStatusMessage(BaseModel):
-    type: Literal['stream_status'] = 'stream_status'
-    payload: dict  # Contains cameraId, status, error
-
-
 class CommandResponseMessage(BaseModel):
     type: Literal['command_response'] = 'command_response'
     request_id: str

@@ -16,25 +16,20 @@ class StreamsController(Controller):
     @get("/")
     async def list_streams(self, stream_manager: StreamManager) -> dict:
         """List all active streams."""
-        streams = await stream_manager.get_all_streams()
+        active_streams = stream_manager.get_active_streams()
 
         return {
             "streams": [
                 {
-                    "id": s.id,
-                    "status": s.status,
-                    "started_at": s.started_at,
-                    "stopped_at": s.stopped_at,
-                    "duration_seconds": s.duration_seconds,
-                    "bitrate_kbps": s.bitrate_kbps,
-                    "viewers_count": s.viewers_count,
-                    "error_message": s.error_message,
-                    "is_active": s.is_active,
+                    "camera_id": stream.camera_id,
+                    "camera_name": stream.camera_name,
+                    "is_running": stream.is_running,
+                    "started_at": stream.started_at,
                 }
-                for s in streams
+                for stream in active_streams
             ],
-            "total": len(streams),
-            "active_count": sum(1 for s in streams if s.is_active),
+            "total": len(active_streams),
+            "active_count": sum(1 for s in active_streams if s.is_running),
         }
 
     @post("/{camera_id:str}/start")
@@ -42,14 +37,12 @@ class StreamsController(Controller):
         self, camera_id: str, stream_manager: StreamManager
     ) -> dict:
         """Start streaming from a camera."""
-        stream_info = await stream_manager.start_stream(camera_id)
-        if not stream_info:
+        success = await stream_manager.start_stream(camera_id)
+        if not success:
             raise HTTPException(status_code=500, detail="Failed to start stream")
 
         return {
-            "id": stream_info.id,
-            "status": stream_info.status,
-            "started_at": stream_info.started_at,
+            "camera_id": camera_id,
             "message": "Stream started successfully",
         }
 
@@ -66,27 +59,3 @@ class StreamsController(Controller):
             )
 
         return {"message": "Stream stopped successfully"}
-
-    @get("/{camera_id:str}/status")
-    async def get_stream_status(
-        self, camera_id: str, stream_manager: StreamManager
-    ) -> dict:
-        """Get stream status for a camera."""
-        stream_info = await stream_manager.get_stream_status(camera_id)
-        if not stream_info:
-            return {
-                "status": "idle",
-                "message": "No active stream",
-            }
-
-        return {
-            "id": stream_info.id,
-            "status": stream_info.status,
-            "started_at": stream_info.started_at,
-            "stopped_at": stream_info.stopped_at,
-            "duration_seconds": stream_info.duration_seconds,
-            "bitrate_kbps": stream_info.bitrate_kbps,
-            "viewers_count": stream_info.viewers_count,
-            "error_message": stream_info.error_message,
-            "is_active": stream_info.is_active,
-        }

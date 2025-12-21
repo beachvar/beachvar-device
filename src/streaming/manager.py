@@ -536,6 +536,10 @@ class StreamManager:
             await self._update_connection(camera_id, is_connected=False, error_message=str(e))
             return False
 
+    def get_active_streams(self) -> list["StreamProcess"]:
+        """Get list of all active streams."""
+        return list(self._streams.values())
+
     async def stop_stream(self, camera_id: str) -> bool:
         """
         Stop streaming from a camera.
