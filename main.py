@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 import uvicorn
 
 from src.gateway import GatewayClient
+from src.gpio import GPIOButtonHandler
 from src.http import create_app
 from src.streaming import StreamManager
 
@@ -40,6 +41,7 @@ http_server: uvicorn.Server | None = None
 http_server_task: asyncio.Task | None = None
 gateway_client: GatewayClient | None = None
 stream_manager: StreamManager | None = None
+gpio_handler: GPIOButtonHandler | None = None
 
 
 # Command handlers for gateway commands
@@ -315,7 +317,7 @@ async def auto_start_streams() -> None:
 
 async def main():
     """Main entry point."""
-    global http_server, gateway_client, stream_manager
+    global http_server, gateway_client, stream_manager, gpio_handler
 
     # Get configuration from environment
     gateway_url = os.getenv('GATEWAY_URL')
@@ -359,6 +361,18 @@ async def main():
         device_id=device_id,
     )
     await stream_manager.start()
+
+    # Initialize GPIO button handler
+    gpio_handler = GPIOButtonHandler(
+        backend_url=backend_url,
+        device_id=device_id,
+        device_token=device_token,
+    )
+    gpio_started = await gpio_handler.start()
+    if gpio_started:
+        logger.info("GPIO button handler initialized successfully")
+    else:
+        logger.info("GPIO not available - running without button support")
 
     # Create Litestar app and start HTTP server
     app = create_app(
@@ -412,6 +426,8 @@ async def main():
         logger.info("Shutting down...")
     finally:
         # Cleanup
+        if gpio_handler:
+            await gpio_handler.stop()
         if stream_manager:
             await stream_manager.stop()
         if http_server:
