@@ -3,35 +3,7 @@ Camera configuration and stream data models.
 """
 
 from dataclasses import dataclass
-from enum import Enum
 from typing import Optional
-
-
-class StreamMode(str, Enum):
-    """Stream mode - how the camera streams video."""
-
-    CLOUDFLARE = "cloudflare"  # Stream to Cloudflare Stream (RTMPS)
-    LOCAL_HLS = "local_hls"    # Stream HLS locally (served via HTTP)
-
-
-@dataclass
-class StreamConfig:
-    """Cloudflare Stream configuration for a camera."""
-
-    live_input_id: str
-    rtmps_url: str
-    rtmps_key: str
-    srt_url: Optional[str] = None
-    srt_passphrase: Optional[str] = None
-    playback_hls: Optional[str] = None
-    playback_dash: Optional[str] = None
-
-    @property
-    def rtmps_full_url(self) -> str:
-        """Get full RTMPS URL with stream key."""
-        # Remove trailing slash from URL if present to avoid double slashes
-        url = self.rtmps_url.rstrip("/")
-        return f"{url}/{self.rtmps_key}"
 
 
 @dataclass
@@ -46,34 +18,15 @@ class CameraConfig:
     court_name: str
     complex_id: str
     complex_name: str
-    stream_mode: StreamMode = StreamMode.CLOUDFLARE
-    stream: Optional[StreamConfig] = None
+    hls_url: str = ""
+    is_connected: bool = False
+    last_seen_at: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "CameraConfig":
         """Create from API response dict."""
-        stream_data = data.get("stream")
-        stream = None
-        if stream_data and stream_data.get("configured"):
-            stream = StreamConfig(
-                live_input_id=stream_data.get("live_input_id", ""),
-                rtmps_url=stream_data.get("rtmps_url", ""),
-                rtmps_key=stream_data.get("rtmps_key", ""),
-                srt_url=stream_data.get("srt_url"),
-                srt_passphrase=stream_data.get("srt_passphrase"),
-                playback_hls=stream_data.get("playback_hls"),
-                playback_dash=stream_data.get("playback_dash"),
-            )
-
         court = data.get("court", {})
         complex_data = data.get("complex", {})
-
-        # Parse stream mode from backend
-        stream_mode_str = data.get("stream_mode", "cloudflare")
-        try:
-            stream_mode = StreamMode(stream_mode_str)
-        except ValueError:
-            stream_mode = StreamMode.CLOUDFLARE
 
         return cls(
             id=data["id"],
@@ -84,53 +37,12 @@ class CameraConfig:
             court_name=court.get("name", ""),
             complex_id=complex_data.get("id", ""),
             complex_name=complex_data.get("name", ""),
-            stream_mode=stream_mode,
-            stream=stream,
+            hls_url=data.get("hls_url", ""),
+            is_connected=data.get("is_connected", False),
+            last_seen_at=data.get("last_seen_at"),
         )
 
     @property
-    def has_stream(self) -> bool:
-        """Check if camera has stream configured."""
-        # For Cloudflare mode, need stream config
-        if self.stream_mode == StreamMode.CLOUDFLARE:
-            return self.stream is not None
-        # For local HLS mode, just need RTSP URL
+    def has_stream_config(self) -> bool:
+        """Check if camera has RTSP URL configured."""
         return bool(self.rtsp_url)
-
-    @property
-    def is_local_hls(self) -> bool:
-        """Check if camera uses local HLS mode."""
-        return self.stream_mode == StreamMode.LOCAL_HLS
-
-
-@dataclass
-class LiveStreamInfo:
-    """Information about an active live stream."""
-
-    id: str
-    status: str
-    started_at: Optional[str] = None
-    stopped_at: Optional[str] = None
-    duration_seconds: Optional[int] = None
-    bitrate_kbps: int = 0
-    viewers_count: int = 0
-    error_message: Optional[str] = None
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "LiveStreamInfo":
-        """Create from API response dict."""
-        return cls(
-            id=data["id"],
-            status=data["status"],
-            started_at=data.get("started_at"),
-            stopped_at=data.get("stopped_at"),
-            duration_seconds=data.get("duration_seconds"),
-            bitrate_kbps=data.get("bitrate_kbps", 0),
-            viewers_count=data.get("viewers_count", 0),
-            error_message=data.get("error_message"),
-        )
-
-    @property
-    def is_active(self) -> bool:
-        """Check if stream is currently active."""
-        return self.status in ["starting", "live"]

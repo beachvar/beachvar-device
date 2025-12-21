@@ -3,10 +3,9 @@
 BeachVar Device - Main entry point.
 
 This device is responsible for:
-1. Maintaining continuous live streams from all registered cameras to Cloudflare Stream
+1. Maintaining continuous live streams from all registered cameras via local HLS
 2. Auto-restarting streams if they fail
-3. Reporting status to the backend
-
+3. Reporting connection status to the backend
 4. Serving HLS streams via HTTP
 """
 
@@ -93,7 +92,7 @@ async def handle_refresh_cameras(params: dict) -> dict:
 
     # Start streams for new cameras that have stream configured
     for camera in cameras:
-        if camera.id in new_camera_ids and camera.has_stream:
+        if camera.id in new_camera_ids and camera.has_stream_config:
             logger.info(f"Starting stream for new camera: {camera.name} ({camera.id})")
             try:
                 result = await stream_manager.start_stream(camera.id)
@@ -126,7 +125,7 @@ async def handle_camera_created(params: dict) -> dict:
         return {"error": f"Camera {camera_id} not found"}
 
     # Start stream if configured
-    if camera.has_stream:
+    if camera.has_stream_config:
         logger.info(f"Starting stream for new camera: {camera.name}")
         result = await stream_manager.start_stream(camera_id)
         return {
@@ -197,7 +196,7 @@ async def handle_camera_updated(params: dict) -> dict:
 
     # Restart stream if it was running and still has stream config
     stream_restarted = False
-    if was_streaming and camera.has_stream:
+    if was_streaming and camera.has_stream_config:
         logger.info(f"Restarting stream for updated camera: {camera.name}")
         result = await stream_manager.start_stream(camera_id)
         stream_restarted = result is not None
@@ -288,7 +287,7 @@ async def auto_start_streams() -> None:
         return
 
     # Filter cameras that have stream configured
-    cameras_with_stream = [c for c in cameras if c.has_stream]
+    cameras_with_stream = [c for c in cameras if c.has_stream_config]
     logger.info(f"Found {len(cameras_with_stream)} cameras with stream config")
 
     # Start streams for cameras that have stream configured

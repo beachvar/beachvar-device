@@ -336,13 +336,8 @@ class DeviceHTTPServer:
                     "court_name": cam.court_name,
                     "complex_id": cam.complex_id,
                     "complex_name": cam.complex_name,
-                    "has_stream": cam.has_stream,
-                    "stream": {
-                        "live_input_id": cam.stream.live_input_id,
-                        "playback_hls": cam.stream.playback_hls,
-                        "playback_dash": cam.stream.playback_dash,
-                    } if cam.stream else None,
-                    "is_streaming": cam.id in self.stream_manager.active_streams,
+                    "hls_url": cam.hls_url,
+                    "is_connected": cam.id in self.stream_manager.active_streams,
                 }
                 for cam in cameras
             ],

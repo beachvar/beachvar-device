@@ -8,7 +8,6 @@ from pydantic import BaseModel
 from typing import Optional
 
 from ...streaming import StreamManager
-from ...streaming.camera import StreamMode
 
 
 class CameraCreateDTO(BaseModel):
@@ -26,30 +25,12 @@ class CameraUpdateDTO(BaseModel):
     position: Optional[str] = None
 
 
-def _get_stream_data(cam, is_streaming: bool) -> dict | None:
-    """
-    Get stream data for a camera.
-    For Cloudflare mode: returns Cloudflare Stream URLs
-    For local_hls mode: returns local HLS URL when streaming
-    """
-    # Cloudflare mode: return stream config if available
-    if cam.stream_mode == StreamMode.CLOUDFLARE and cam.stream:
-        return {
-            "live_input_id": cam.stream.live_input_id,
-            "playback_hls": cam.stream.playback_hls,
-            "playback_dash": cam.stream.playback_dash,
-        }
-
-    # Local HLS mode: return local URL when streaming
-    # Uses /api/hls/ which is protected by Cloudflare Zero Trust (no signature needed)
-    if cam.stream_mode == StreamMode.LOCAL_HLS and is_streaming:
-        return {
-            "live_input_id": None,
-            "playback_hls": f"/api/hls/{cam.id}/playlist.m3u8",
-            "playback_dash": None,
-        }
-
-    return None
+def _get_hls_url(cam, is_connected: bool) -> str:
+    """Get local HLS URL for a camera when connected."""
+    if is_connected:
+        # Uses /api/hls/ which is protected by Cloudflare Zero Trust (no signature needed)
+        return f"/api/hls/{cam.id}/playlist.m3u8"
+    return ""
 
 
 class CamerasController(Controller):
@@ -73,10 +54,10 @@ class CamerasController(Controller):
                     "court_name": cam.court_name,
                     "complex_id": cam.complex_id,
                     "complex_name": cam.complex_name,
-                    "has_stream": cam.has_stream,
-                    "stream_mode": cam.stream_mode.value if cam.stream_mode else None,
-                    "stream": _get_stream_data(cam, cam.id in stream_manager.active_streams),
-                    "is_streaming": cam.id in stream_manager.active_streams,
+                    "hls_url": _get_hls_url(cam, cam.id in stream_manager.active_streams),
+                    "is_connected": cam.id in stream_manager.active_streams,
+                    "last_seen_at": cam.last_seen_at,
+                    "connection_error": None,
                 }
                 for cam in cameras
             ],
@@ -90,7 +71,7 @@ class CamerasController(Controller):
         if not camera:
             raise HTTPException(status_code=404, detail="Camera not found")
 
-        is_streaming = camera.id in stream_manager.active_streams
+        is_connected = camera.id in stream_manager.active_streams
         return {
             "id": camera.id,
             "name": camera.name,
@@ -100,10 +81,10 @@ class CamerasController(Controller):
             "court_name": camera.court_name,
             "complex_id": camera.complex_id,
             "complex_name": camera.complex_name,
-            "has_stream": camera.has_stream,
-            "stream_mode": camera.stream_mode.value if camera.stream_mode else None,
-            "stream": _get_stream_data(camera, is_streaming),
-            "is_streaming": is_streaming,
+            "hls_url": _get_hls_url(camera, is_connected),
+            "is_connected": is_connected,
+            "last_seen_at": camera.last_seen_at,
+            "connection_error": None,
         }
 
     @post("/")
@@ -130,13 +111,8 @@ class CamerasController(Controller):
             "court_name": camera.court_name,
             "complex_id": camera.complex_id,
             "complex_name": camera.complex_name,
-            "has_stream": camera.has_stream,
-            "stream": {
-                "live_input_id": camera.stream.live_input_id,
-                "rtmps_url": camera.stream.rtmps_url,
-                "playback_hls": camera.stream.playback_hls,
-                "playback_dash": camera.stream.playback_dash,
-            } if camera.stream else None,
+            "hls_url": "",
+            "is_connected": False,
         }
 
     @patch("/{camera_id:str}")
