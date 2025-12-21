@@ -485,7 +485,7 @@ class StreamManager:
             logger.error(f"Camera {camera_id} not found")
             return False
 
-        if not camera.has_stream_config_config:
+        if not camera.has_stream_config:
             logger.error(f"Camera {camera.name} has no RTSP URL configured")
             return False
 
