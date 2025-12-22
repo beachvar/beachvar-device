@@ -17,6 +17,7 @@ import aiohttp
 
 from .camera import CameraConfig
 from .logs import log_manager
+from .device_logs import device_log_manager
 
 logger = logging.getLogger(__name__)
 
@@ -721,14 +722,22 @@ class StreamManager:
         self,
         camera_id: str,
         camera_name: str,
-        process: subprocess.Popen
+        process: subprocess.Popen,
+        process_type: str = "hls",
     ) -> None:
         """
         Read FFmpeg stderr output asynchronously and store in log manager.
 
         This runs in background and captures all FFmpeg output for debugging.
+
+        Args:
+            camera_id: Camera UUID
+            camera_name: Camera display name
+            process: FFmpeg subprocess
+            process_type: Type of FFmpeg process (hls, youtube)
         """
         loop = asyncio.get_event_loop()
+        logger_name = f"ffmpeg.{process_type}.{camera_name}"
 
         try:
             while process.poll() is None:
@@ -750,7 +759,15 @@ class StreamManager:
                             x in text.lower() for x in ["error", "fatal", "failed"]
                         ) else "warning" if "warning" in text.lower() else "info"
 
+                        # Send to camera-specific logs
                         await log_manager.add_log(camera_id, text, level, camera_name)
+
+                        # Also send to device-wide logs
+                        await device_log_manager.add(
+                            message=f"[{camera_name}] {text}",
+                            level=level,
+                            logger_name=logger_name,
+                        )
                 except Exception:
                     pass
 
@@ -761,14 +778,22 @@ class StreamManager:
                     for line in remaining.decode("utf-8", errors="ignore").strip().split("\n"):
                         if line:
                             await log_manager.add_log(camera_id, line, "info", camera_name)
+                            await device_log_manager.add(
+                                message=f"[{camera_name}] {line}",
+                                level="info",
+                                logger_name=logger_name,
+                            )
 
             # Log exit code
             exit_code = process.returncode
-            await log_manager.add_log(
-                camera_id,
-                f"FFmpeg exited with code {exit_code}",
-                "error" if exit_code != 0 else "info",
-                camera_name
+            exit_msg = f"FFmpeg exited with code {exit_code}"
+            exit_level = "error" if exit_code != 0 else "info"
+
+            await log_manager.add_log(camera_id, exit_msg, exit_level, camera_name)
+            await device_log_manager.add(
+                message=f"[{camera_name}] {exit_msg}",
+                level=exit_level,
+                logger_name=logger_name,
             )
 
         except asyncio.CancelledError:
@@ -1136,6 +1161,9 @@ class StreamManager:
                         del self._youtube_streams[broadcast_id]
                         self._youtube_last_heartbeat.pop(broadcast_id, None)
 
+                        # Clean up log reader task (it will end on its own but cleanup ref)
+                        self._youtube_log_tasks.pop(broadcast_id, None)
+
                         # Get broadcast data for retry
                         broadcast_data = self._get_broadcast_data_from_cache(broadcast_id)
                         camera_id = broadcast_data.get("camera_id", "") if broadcast_data else ""
@@ -1382,6 +1410,9 @@ class StreamManager:
     YOUTUBE_MAX_RETRIES = 5
     YOUTUBE_RETRY_DELAY = 5  # seconds
 
+    # YouTube log reader tasks: {broadcast_id: asyncio.Task}
+    _youtube_log_tasks: dict[str, asyncio.Task] = {}
+
     async def start_youtube_stream(
         self,
         camera_id: str,
@@ -1469,6 +1500,17 @@ class StreamManager:
             # Remove from failed set if this is a retry
             self._youtube_failed_broadcasts.discard(broadcast_id)
 
+            # Start log reader task for YouTube FFmpeg
+            log_task = asyncio.create_task(
+                self._read_ffmpeg_logs(
+                    camera_id=camera_id,
+                    camera_name=camera_name,
+                    process=process,
+                    process_type="youtube",
+                )
+            )
+            self._youtube_log_tasks[broadcast_id] = log_task
+
             logger.info(f"YouTube stream started for {camera_name} (PID: {process.pid})")
 
             # Notify backend about successful start
@@ -1524,6 +1566,15 @@ class StreamManager:
 
         except Exception as e:
             logger.error(f"Error stopping YouTube stream for {camera_name}: {e}")
+
+        # Cancel log reader task
+        log_task = self._youtube_log_tasks.pop(broadcast_id, None)
+        if log_task and not log_task.done():
+            log_task.cancel()
+            try:
+                await log_task
+            except asyncio.CancelledError:
+                pass
 
         # Remove from active streams
         del self._youtube_streams[broadcast_id]
