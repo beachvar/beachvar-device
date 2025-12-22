@@ -831,7 +831,9 @@ class StreamManager:
         return [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "error",
+            "-loglevel", "warning",
+            "-stats",
+            "-stats_period", "60",  # Show stats every 60 seconds
 
             # Input options - optimized for RTSP
             "-rtsp_transport", "tcp",
@@ -1462,7 +1464,9 @@ class StreamManager:
         cmd = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "error",
+            "-loglevel", "warning",
+            "-stats",
+            "-stats_period", "60",  # Show stats every 60 seconds
 
             # Input from HLS - use live_start_index to start from current position
             "-live_start_index", "-1",
