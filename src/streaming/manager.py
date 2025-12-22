@@ -234,6 +234,13 @@ class StreamManager:
         # Find broadcasts to stop (running locally but not in backend anymore)
         broadcasts_to_stop = local_broadcast_ids - backend_broadcast_ids
 
+        # Clean up "stopping" broadcasts that are no longer in backend
+        # (backend has processed the stop request)
+        stale_stopping = self._youtube_stopping_broadcasts - backend_broadcast_ids
+        if stale_stopping:
+            logger.info(f"Cleaning up {len(stale_stopping)} stopped broadcast(s) no longer in backend")
+            self._youtube_stopping_broadcasts -= stale_stopping
+
         # Clean up failed broadcasts that are no longer in backend
         # (backend marked them as ERROR, so they're not returned as active)
         stale_failed = self._youtube_failed_broadcasts - backend_broadcast_ids
@@ -269,6 +276,14 @@ class StreamManager:
         for broadcast_data in backend_broadcasts:
             broadcast_id = broadcast_data["id"]
             if broadcast_id not in broadcasts_to_start:
+                continue
+
+            # Skip broadcasts that are being stopped (prevents race condition restart)
+            if broadcast_id in self._youtube_stopping_broadcasts:
+                logger.debug(
+                    f"Skipping broadcast {broadcast_id} - marked as stopping, "
+                    "waiting for backend to process stop request"
+                )
                 continue
 
             # Skip broadcasts that recently failed (prevents restart loop)
@@ -1400,6 +1415,10 @@ class StreamManager:
     # This prevents the sync loop from restarting broadcasts that died with errors
     _youtube_failed_broadcasts: set[str] = set()
 
+    # Broadcasts that are being stopped (prevents sync from restarting them)
+    # This prevents race condition where sync sees broadcast as active before backend updates
+    _youtube_stopping_broadcasts: set[str] = set()
+
     # YouTube retry tracking: {broadcast_id: retry_count}
     # Used to retry failed broadcasts up to max attempts before marking as failed
     _youtube_retry_counts: dict[str, int] = {}
@@ -1548,9 +1567,14 @@ class StreamManager:
 
         logger.info(f"=== Stopping YouTube stream for {camera_name} (broadcast: {broadcast_id}) ===")
 
+        # Mark as stopping IMMEDIATELY to prevent sync from restarting it
+        # This prevents race condition where sync sees broadcast as active before backend updates
+        self._youtube_stopping_broadcasts.add(broadcast_id)
+
         process = self._youtube_streams.get(broadcast_id)
         if not process:
             logger.warning(f"No active YouTube stream for broadcast {broadcast_id}")
+            # Still mark as stopping in case sync is about to start it
             return False
 
         try:
@@ -1578,13 +1602,18 @@ class StreamManager:
                 pass
 
         # Remove from active streams
-        del self._youtube_streams[broadcast_id]
+        self._youtube_streams.pop(broadcast_id, None)
+        self._youtube_last_heartbeat.pop(broadcast_id, None)
 
         # Notify backend
         await self._update_youtube_broadcast_status(
             broadcast_id,
             status="complete",
         )
+
+        # Keep in stopping set for a while to handle any pending syncs
+        # Will be cleaned up when sync sees it's no longer in backend
+        logger.debug(f"Broadcast {broadcast_id} marked as stopping, will be cleaned on next sync")
 
         return True
 
