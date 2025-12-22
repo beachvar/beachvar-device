@@ -852,6 +852,7 @@ class StreamManager:
             "-c:a", "aac",
             "-b:a", "128k",
             "-ar", "44100",
+            "-af", "aresample=async=1000",  # Sync audio timestamps, fix gaps/drift from camera
 
             # HLS output options for live streaming
             "-f", "hls",
