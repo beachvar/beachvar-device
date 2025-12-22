@@ -239,6 +239,10 @@ class StreamManager:
         if stale_failed:
             logger.info(f"Cleaning up {len(stale_failed)} failed broadcast(s) no longer in backend")
             self._youtube_failed_broadcasts -= stale_failed
+            # Also clean retry tracking for stale broadcasts
+            for broadcast_id in stale_failed:
+                self._youtube_retry_counts.pop(broadcast_id, None)
+                self._youtube_pending_retries.discard(broadcast_id)
 
         # Stop broadcasts that were removed from backend
         for broadcast_id in broadcasts_to_stop:
@@ -256,6 +260,9 @@ class StreamManager:
 
             self._youtube_streams.pop(broadcast_id, None)
             self._youtube_last_heartbeat.pop(broadcast_id, None)
+            # Clean retry tracking for stopped broadcasts
+            self._youtube_retry_counts.pop(broadcast_id, None)
+            self._youtube_pending_retries.discard(broadcast_id)
 
         # Start new broadcasts
         for broadcast_data in backend_broadcasts:
@@ -1125,21 +1132,56 @@ class StreamManager:
                             stderr_clean = stderr.strip().split('\n')[-1]
                             error_msg += f": {stderr_clean}"
 
-                        logger.error(f"YouTube stream {broadcast_id} failed: {error_msg}")
-
-                        # Mark as failed BEFORE notifying backend (prevents race with sync)
-                        self._youtube_failed_broadcasts.add(broadcast_id)
-
-                        # Notify backend
-                        await self._update_youtube_broadcast_status(
-                            broadcast_id,
-                            status="error",
-                            error_message=error_msg,
-                        )
-
                         # Remove from active YouTube streams
                         del self._youtube_streams[broadcast_id]
                         self._youtube_last_heartbeat.pop(broadcast_id, None)
+
+                        # Get broadcast data for retry
+                        broadcast_data = self._get_broadcast_data_from_cache(broadcast_id)
+                        camera_id = broadcast_data.get("camera_id", "") if broadcast_data else ""
+                        camera_name = broadcast_data.get("camera_name", broadcast_id) if broadcast_data else broadcast_id
+
+                        # Check retry count
+                        retry_count = self._youtube_retry_counts.get(broadcast_id, 0)
+
+                        if retry_count < self.YOUTUBE_MAX_RETRIES and broadcast_id not in self._youtube_pending_retries:
+                            # Schedule retry
+                            self._youtube_retry_counts[broadcast_id] = retry_count + 1
+                            self._youtube_pending_retries.add(broadcast_id)
+
+                            logger.warning(
+                                f"YouTube stream {broadcast_id} for {camera_name} failed: {error_msg}. "
+                                f"Retry {retry_count + 1}/{self.YOUTUBE_MAX_RETRIES} in {self.YOUTUBE_RETRY_DELAY}s"
+                            )
+
+                            asyncio.create_task(
+                                self._delayed_youtube_retry(
+                                    broadcast_id=broadcast_id,
+                                    camera_id=camera_id,
+                                    camera_name=camera_name,
+                                    delay=self.YOUTUBE_RETRY_DELAY,
+                                )
+                            )
+                        else:
+                            # Max retries reached, mark as failed
+                            logger.error(
+                                f"YouTube stream {broadcast_id} for {camera_name} failed after "
+                                f"{self.YOUTUBE_MAX_RETRIES} attempts: {error_msg}"
+                            )
+
+                            # Mark as failed BEFORE notifying backend (prevents race with sync)
+                            self._youtube_failed_broadcasts.add(broadcast_id)
+
+                            # Notify backend
+                            await self._update_youtube_broadcast_status(
+                                broadcast_id,
+                                status="error",
+                                error_message=f"{error_msg} (after {self.YOUTUBE_MAX_RETRIES} retries)",
+                            )
+
+                            # Clean up retry tracking
+                            self._youtube_retry_counts.pop(broadcast_id, None)
+                            self._youtube_pending_retries.discard(broadcast_id)
 
                 # Send YouTube heartbeats (every 30 seconds)
                 for broadcast_id, process in list(self._youtube_streams.items()):
@@ -1328,6 +1370,17 @@ class StreamManager:
     # Broadcasts that failed and should not be auto-restarted
     # This prevents the sync loop from restarting broadcasts that died with errors
     _youtube_failed_broadcasts: set[str] = set()
+
+    # YouTube retry tracking: {broadcast_id: retry_count}
+    # Used to retry failed broadcasts up to max attempts before marking as failed
+    _youtube_retry_counts: dict[str, int] = {}
+
+    # YouTube pending retries: set of broadcast_ids currently waiting to retry
+    _youtube_pending_retries: set[str] = set()
+
+    # YouTube retry configuration
+    YOUTUBE_MAX_RETRIES = 5
+    YOUTUBE_RETRY_DELAY = 5  # seconds
 
     async def start_youtube_stream(
         self,
@@ -1527,6 +1580,100 @@ class StreamManager:
         except Exception as e:
             logger.error(f"Error updating YouTube broadcast status: {e}")
             return False
+
+    def _get_broadcast_data_from_cache(self, broadcast_id: str) -> Optional[dict]:
+        """
+        Get broadcast data from cached device state.
+
+        Args:
+            broadcast_id: YouTube broadcast record UUID
+
+        Returns:
+            Dict with broadcast data or None if not found
+        """
+        if not self._last_state:
+            return None
+
+        broadcasts = self._last_state.get("broadcasts", [])
+        for broadcast in broadcasts:
+            if broadcast.get("id") == broadcast_id:
+                return broadcast
+
+        return None
+
+    async def _delayed_youtube_retry(
+        self,
+        broadcast_id: str,
+        camera_id: str,
+        camera_name: str,
+        delay: float,
+    ) -> None:
+        """
+        Retry a YouTube stream after a delay.
+
+        Args:
+            broadcast_id: YouTube broadcast record UUID
+            camera_id: Camera UUID
+            camera_name: Camera name for logging
+            delay: Delay in seconds before retry
+        """
+        try:
+            await asyncio.sleep(delay)
+
+            # Remove from pending
+            self._youtube_pending_retries.discard(broadcast_id)
+
+            # Check if broadcast is still in backend (not removed)
+            broadcast_data = self._get_broadcast_data_from_cache(broadcast_id)
+            if not broadcast_data:
+                # Broadcast was removed from backend, refresh state and check again
+                await self.sync_device_state()
+                broadcast_data = self._get_broadcast_data_from_cache(broadcast_id)
+
+            if not broadcast_data:
+                logger.info(f"YouTube broadcast {broadcast_id} no longer in backend, skipping retry")
+                self._youtube_retry_counts.pop(broadcast_id, None)
+                return
+
+            # Check if already running (maybe started by sync)
+            if broadcast_id in self._youtube_streams:
+                if self._youtube_streams[broadcast_id].poll() is None:
+                    logger.info(f"YouTube broadcast {broadcast_id} already running, skipping retry")
+                    return
+
+            # Check if marked as failed (max retries reached)
+            if broadcast_id in self._youtube_failed_broadcasts:
+                logger.debug(f"YouTube broadcast {broadcast_id} marked as failed, skipping retry")
+                return
+
+            rtmp_url = broadcast_data.get("rtmp_url", "")
+            stream_key = broadcast_data.get("stream_key", "")
+
+            if not rtmp_url or not stream_key:
+                logger.warning(f"Cannot retry YouTube broadcast {broadcast_id}: missing RTMP URL or stream key")
+                return
+
+            retry_count = self._youtube_retry_counts.get(broadcast_id, 0)
+            logger.info(f"Retrying YouTube stream for {camera_name} (attempt {retry_count + 1}/{self.YOUTUBE_MAX_RETRIES})")
+
+            success = await self.start_youtube_stream(
+                camera_id=camera_id,
+                broadcast_id=broadcast_id,
+                rtmp_url=rtmp_url,
+                stream_key=stream_key,
+            )
+
+            if success:
+                logger.info(f"YouTube stream retry successful for {camera_name}")
+                # Reset retry count on success
+                self._youtube_retry_counts.pop(broadcast_id, None)
+
+        except asyncio.CancelledError:
+            self._youtube_pending_retries.discard(broadcast_id)
+            raise
+        except Exception as e:
+            logger.error(f"Error in delayed YouTube retry for {broadcast_id}: {e}")
+            self._youtube_pending_retries.discard(broadcast_id)
 
     def get_youtube_stream_status(self, broadcast_id: str) -> Optional[dict]:
         """

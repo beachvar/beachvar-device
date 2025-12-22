@@ -24,6 +24,7 @@ from src.gateway import GatewayClient
 from src.gpio import GPIOButtonHandler
 from src.http import create_app
 from src.streaming import StreamManager
+from src.streaming.device_logs import device_log_manager
 
 # Load environment variables
 load_dotenv()
@@ -391,6 +392,10 @@ async def main():
     global http_server_task
     http_server_task = asyncio.create_task(http_server.serve())
     logger.info(f"HTTP server started on http://0.0.0.0:{http_port}")
+
+    # Setup device log manager to capture all Python logs
+    device_log_manager.setup()
+    logger.info("Device log manager initialized")
 
     # Auto-start streams for registered cameras
     await auto_start_streams()
