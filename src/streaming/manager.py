@@ -440,9 +440,17 @@ class StreamManager:
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        camera = CameraConfig.from_dict(data)
-                        self._cameras[camera.id] = camera
-                        logger.info(f"Updated camera: {camera.name} ({camera.id})")
+                        # Backend returns {"success": true, "camera": {...}}
+                        # Update local cache with new values
+                        camera_data = data.get("camera", {})
+                        camera = self._cameras.get(camera_id)
+                        if camera:
+                            # Update fields that may have changed
+                            if "name" in camera_data:
+                                camera.name = camera_data["name"]
+                            if "rtsp_url" in camera_data:
+                                camera.rtsp_url = camera_data["rtsp_url"]
+                            logger.info(f"Updated camera: {camera.name} ({camera.id})")
                         return camera
                     else:
                         error = await resp.text()
