@@ -440,10 +440,9 @@ class StreamManager:
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        camera = self._parse_camera(data)
-                        if camera:
-                            self._cameras[camera.id] = camera
-                            logger.info(f"Updated camera: {camera.name} ({camera.id})")
+                        camera = CameraConfig.from_dict(data)
+                        self._cameras[camera.id] = camera
+                        logger.info(f"Updated camera: {camera.name} ({camera.id})")
                         return camera
                     else:
                         error = await resp.text()
