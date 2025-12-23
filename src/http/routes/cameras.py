@@ -15,14 +15,12 @@ class CameraCreateDTO(BaseModel):
     name: str
     rtsp_url: str
     court_id: str
-    position: str = "other"
 
 
 class CameraUpdateDTO(BaseModel):
     """DTO for updating a camera."""
     name: Optional[str] = None
     rtsp_url: Optional[str] = None
-    position: Optional[str] = None
 
 
 def _get_hls_url(cam, is_connected: bool) -> str:
@@ -49,7 +47,6 @@ class CamerasController(Controller):
                     "id": cam.id,
                     "name": cam.name,
                     "rtsp_url": cam.rtsp_url,
-                    "position": cam.position,
                     "court_id": cam.court_id,
                     "court_name": cam.court_name,
                     "complex_id": cam.complex_id,
@@ -76,7 +73,6 @@ class CamerasController(Controller):
             "id": camera.id,
             "name": camera.name,
             "rtsp_url": camera.rtsp_url,
-            "position": camera.position,
             "court_id": camera.court_id,
             "court_name": camera.court_name,
             "complex_id": camera.complex_id,
@@ -96,7 +92,6 @@ class CamerasController(Controller):
             name=data.name,
             rtsp_url=data.rtsp_url,
             court_id=data.court_id,
-            position=data.position,
         )
 
         if not camera:
@@ -106,7 +101,6 @@ class CamerasController(Controller):
             "id": camera.id,
             "name": camera.name,
             "rtsp_url": camera.rtsp_url,
-            "position": camera.position,
             "court_id": camera.court_id,
             "court_name": camera.court_name,
             "complex_id": camera.complex_id,
@@ -126,8 +120,6 @@ class CamerasController(Controller):
             update_data["name"] = data.name
         if data.rtsp_url is not None:
             update_data["rtsp_url"] = data.rtsp_url
-        if data.position is not None:
-            update_data["position"] = data.position
 
         if not update_data:
             raise HTTPException(status_code=400, detail="No fields to update")
@@ -140,7 +132,6 @@ class CamerasController(Controller):
             "id": camera.id,
             "name": camera.name,
             "rtsp_url": camera.rtsp_url,
-            "position": camera.position,
             "court_id": camera.court_id,
             "court_name": camera.court_name,
         }

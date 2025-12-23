@@ -13,7 +13,6 @@ class CameraConfig:
     id: str
     name: str
     rtsp_url: str
-    position: str
     court_id: str
     court_name: str
     complex_id: str
@@ -32,7 +31,6 @@ class CameraConfig:
             id=data["id"],
             name=data["name"],
             rtsp_url=data["rtsp_url"],
-            position=data.get("position", "other"),
             court_id=court.get("id", ""),
             court_name=court.get("name", ""),
             complex_id=complex_data.get("id", ""),

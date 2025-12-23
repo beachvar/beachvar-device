@@ -363,7 +363,6 @@ class StreamManager:
         name: str,
         rtsp_url: str,
         court_id: str,
-        position: str = "other",
     ) -> Optional[CameraConfig]:
         """
         Register a new camera with the backend.
@@ -372,7 +371,6 @@ class StreamManager:
             name: Camera name
             rtsp_url: RTSP URL for the camera
             court_id: Court UUID to associate camera with
-            position: Camera position (side1, side2, aerial, other)
 
         Returns:
             Created CameraConfig or None on error
@@ -384,7 +382,6 @@ class StreamManager:
                     "name": name,
                     "rtsp_url": rtsp_url,
                     "court_id": court_id,
-                    "position": position,
                 }
 
                 async with session.post(
