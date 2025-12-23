@@ -845,10 +845,11 @@ class StreamManager:
             "-hide_banner",
             "-loglevel", "warning",
 
-            # Input options - optimized for RTSP
+            # Input options - optimized for RTSP with low latency
             "-rtsp_transport", "tcp",
             "-timeout", "10000000",  # 10 seconds timeout for socket I/O operations (microseconds)
-            "-fflags", "+genpts+discardcorrupt",
+            "-fflags", "+genpts+discardcorrupt+nobuffer",  # nobuffer reduces input latency
+            "-flags", "low_delay",  # Low latency mode
             "-use_wallclock_as_timestamps", "1",
             "-i", rtsp_url,
 
@@ -866,10 +867,10 @@ class StreamManager:
             "-ar", "44100",
             "-af", "aresample=async=1000",  # Sync audio timestamps, fix gaps/drift from camera
 
-            # HLS output options for live streaming
+            # HLS output options for live streaming with low latency
             "-f", "hls",
-            "-hls_time", "2",            # 2-second segments
-            "-hls_list_size", "3600",    # Keep last 3600 segments in playlist (2 hours DVR window)
+            "-hls_time", "1",            # 1-second segments for lower latency
+            "-hls_list_size", "7200",    # Keep last 7200 segments in playlist (2 hours DVR window with 1s segments)
             "-hls_flags", "delete_segments",  # Delete old segment files
             "-hls_segment_filename", segment_pattern,
             output_path,
