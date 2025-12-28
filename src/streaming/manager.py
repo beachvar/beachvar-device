@@ -877,7 +877,7 @@ class StreamManager:
             # HLS output options for live streaming with low latency
             "-f", "hls",
             "-hls_time", "2",            # 2-second segments for better stability
-            "-hls_list_size", "3600",    # Keep last 3600 segments in playlist (2 hours DVR window with 2s segments)
+            "-hls_list_size", "120",     # Keep last 120 segments in playlist (4 min DVR window with 2s segments)
             "-hls_flags", "delete_segments",  # Delete old segment files
             "-hls_segment_filename", segment_pattern,
             output_path,

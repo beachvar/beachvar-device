@@ -61,11 +61,20 @@ services:
     env_file:
       - .env
     volumes:
-      - /tmp/hls:/tmp/hls
+      - /tmp/hls:/tmp/hls  # tmpfs em producao (2GB RAM)
     ports:
       - "8080:8080"
     restart: unless-stopped
 ```
+
+### HLS Storage
+
+Em producao, os segmentos HLS sao armazenados em RAM (tmpfs) para:
+- Melhor performance de I/O
+- Menor desgaste do cartao SD
+- Janela DVR de 4 minutos (120 segmentos de 2s)
+
+O setup automatico (`/api/setup`) configura o tmpfs com 2GB.
 
 ### Variaveis de Ambiente
 
