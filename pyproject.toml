@@ -13,4 +13,5 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "uvloop>=0.21.0",
     "websockets>=15.0.1",
+    "sentry-sdk[aiohttp]>=2.0.0",
 ]

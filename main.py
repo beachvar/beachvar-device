@@ -23,6 +23,7 @@ import uvicorn
 from src.gateway import GatewayClient
 from src.gpio import GPIOButtonHandler
 from src.http import create_app
+from src.sentry import init_sentry
 from src.streaming import StreamManager
 from src.streaming.device_logs import device_log_manager
 
@@ -315,6 +316,36 @@ async def auto_start_streams() -> None:
     logger.info("=" * 50)
 
 
+async def fetch_device_config(backend_url: str, device_id: str, device_token: str) -> dict:
+    """
+    Fetch device configuration from backend.
+
+    Returns config with gateway_url, tunnel_token, sentry_dsn, etc.
+    """
+    import aiohttp
+    import base64
+
+    credentials = f"{device_id}:{device_token}"
+    encoded = base64.b64encode(credentials.encode()).decode()
+    headers = {
+        "Authorization": f"Basic {encoded}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"{backend_url}/api/v1/device/config/"
+            async with session.get(url, headers=headers, timeout=10) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                else:
+                    logger.warning(f"Failed to fetch device config: {resp.status}")
+                    return {}
+    except Exception as e:
+        logger.warning(f"Error fetching device config: {e}")
+        return {}
+
+
 async def main():
     """Main entry point."""
     global http_server, gateway_client, stream_manager, gpio_handler
@@ -353,6 +384,27 @@ async def main():
     logger.info(f"Gateway: {gateway_url}")
     logger.info(f"Backend: {backend_url}")
     logger.info(f"Device ID: {device_id}")
+
+    # Fetch device config from backend (includes Sentry DSN)
+    device_config = await fetch_device_config(backend_url, device_id, device_token)
+
+    # Initialize Sentry for error tracking and tracing
+    sentry_dsn = device_config.get("sentry_dsn") or os.getenv("SENTRY_DSN", "")
+    sentry_environment = device_config.get("sentry_environment") or os.getenv("SENTRY_ENVIRONMENT", "production")
+    sentry_traces_sample_rate = device_config.get("sentry_traces_sample_rate") or float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.2"))
+
+    if sentry_dsn:
+        sentry_initialized = init_sentry(
+            dsn=sentry_dsn,
+            device_id=device_id,
+            environment=sentry_environment,
+            traces_sample_rate=sentry_traces_sample_rate,
+            release=os.getenv("VERSION"),
+        )
+        if sentry_initialized:
+            logger.info("Sentry error tracking enabled")
+    else:
+        logger.info("Sentry DSN not configured, error tracking disabled")
 
     # Initialize stream manager
     stream_manager = StreamManager(

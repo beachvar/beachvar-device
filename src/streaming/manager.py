@@ -18,6 +18,7 @@ import aiohttp
 from .camera import CameraConfig
 from .logs import log_manager
 from .device_logs import device_log_manager
+from ..sentry import traced, TracingContext, set_camera_context, clear_camera_context, capture_exception
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +179,7 @@ class StreamManager:
             logger.error(f"Error fetching device state: {e}")
             return None
 
+    @traced(op="sync", name="sync_device_state")
     async def sync_device_state(self) -> bool:
         """
         Sync device state from backend in a single call.
@@ -186,29 +188,39 @@ class StreamManager:
         Returns:
             True if sync was successful
         """
-        state = await self.fetch_device_state()
+        with TracingContext(op="http", description="fetch_device_state") as span:
+            state = await self.fetch_device_state()
+            span.set_data("success", state is not None)
+            if state:
+                span.set_data("cameras_count", len(state.get("cameras", [])))
+                span.set_data("broadcasts_count", len(state.get("broadcasts", [])))
+
         if state is None:
             return False
 
         # Update cameras
-        camera_list = state.get("cameras", [])
-        cameras = [CameraConfig.from_dict(c) for c in camera_list]
-        new_camera_ids = {c.id for c in cameras}
-        old_camera_ids = set(self._cameras.keys())
+        with TracingContext(op="task", description="process_cameras") as span:
+            camera_list = state.get("cameras", [])
+            cameras = [CameraConfig.from_dict(c) for c in camera_list]
+            new_camera_ids = {c.id for c in cameras}
+            old_camera_ids = set(self._cameras.keys())
 
-        # Find cameras that were deleted from backend
-        deleted_camera_ids = old_camera_ids - new_camera_ids
-        for camera_id in deleted_camera_ids:
-            camera = self._cameras.get(camera_id)
-            camera_name = camera.name if camera else camera_id
-            logger.info(f"Camera {camera_name} ({camera_id}) removed from backend, cleaning up...")
-            await self._cleanup_deleted_camera(camera_id)
+            # Find cameras that were deleted from backend
+            deleted_camera_ids = old_camera_ids - new_camera_ids
+            span.set_data("deleted_count", len(deleted_camera_ids))
 
-        # Update camera cache with new data
-        self._cameras = {c.id: c for c in cameras}
+            for camera_id in deleted_camera_ids:
+                camera = self._cameras.get(camera_id)
+                camera_name = camera.name if camera else camera_id
+                logger.info(f"Camera {camera_name} ({camera_id}) removed from backend, cleaning up...")
+                await self._cleanup_deleted_camera(camera_id)
+
+            # Update camera cache with new data
+            self._cameras = {c.id: c for c in cameras}
 
         # Sync YouTube broadcasts
-        await self._sync_youtube_broadcasts(state.get("broadcasts", []))
+        with TracingContext(op="task", description="sync_youtube_broadcasts"):
+            await self._sync_youtube_broadcasts(state.get("broadcasts", []))
 
         return True
 
@@ -483,6 +495,7 @@ class StreamManager:
 
     # ==================== Stream Management ====================
 
+    @traced(op="stream", name="start_stream")
     async def start_stream(self, camera_id: str) -> bool:
         """
         Start streaming from a camera via local HLS.
@@ -497,29 +510,39 @@ class StreamManager:
         camera = self._cameras.get(camera_id)
         camera_name = camera.name if camera else camera_id
 
+        # Set Sentry context for this camera
+        set_camera_context(camera_id, camera_name)
+
         logger.info(f"=== Starting stream for {camera_name} ({camera_id}) ===")
 
-        # Check if already streaming
-        if camera_id in self._streams and self._streams[camera_id].is_running:
-            logger.warning(f"Camera {camera_name} is already streaming")
-            return False
-
-        # Get camera config
-        if not camera:
-            camera = await self.get_camera(camera_id)
-
-        if not camera:
-            logger.error(f"Camera {camera_id} not found")
-            return False
-
-        if not camera.has_stream_config:
-            logger.error(f"Camera {camera.name} has no RTSP URL configured")
-            return False
-
-        # Start FFmpeg process
         try:
-            logger.info(f"Starting FFmpeg for {camera.name}...")
-            process = self._start_ffmpeg(camera)
+            # Check if already streaming
+            if camera_id in self._streams and self._streams[camera_id].is_running:
+                logger.warning(f"Camera {camera_name} is already streaming")
+                return False
+
+            # Get camera config
+            with TracingContext(op="http", description="fetch_camera") as span:
+                if not camera:
+                    camera = await self.get_camera(camera_id)
+                span.set_data("camera_found", camera is not None)
+
+            if not camera:
+                logger.error(f"Camera {camera_id} not found")
+                return False
+
+            if not camera.has_stream_config:
+                logger.error(f"Camera {camera.name} has no RTSP URL configured")
+                return False
+
+            # Update camera name after fetch
+            set_camera_context(camera_id, camera.name)
+
+            # Start FFmpeg process
+            with TracingContext(op="subprocess", description="start_ffmpeg") as span:
+                logger.info(f"Starting FFmpeg for {camera.name}...")
+                process = self._start_ffmpeg(camera)
+                span.set_data("pid", process.pid)
 
             # Initialize log manager for this camera
             await log_manager.init_camera(camera_id, camera.name)
@@ -545,8 +568,10 @@ class StreamManager:
             await asyncio.sleep(0.5)
 
             # Update backend with connection status
-            logger.info(f"Updating connection to 'connected' for {camera.name}...")
-            status_updated = await self._update_connection(camera_id, is_connected=True)
+            with TracingContext(op="http", description="update_connection") as span:
+                logger.info(f"Updating connection to 'connected' for {camera.name}...")
+                status_updated = await self._update_connection(camera_id, is_connected=True)
+                span.set_data("success", status_updated)
 
             if status_updated:
                 logger.info(f"=== Stream LIVE for {camera.name} ===")
@@ -560,8 +585,11 @@ class StreamManager:
 
         except Exception as e:
             logger.error(f"Failed to start FFmpeg for {camera.name}: {e}")
+            capture_exception(e, camera_id=camera_id, camera_name=camera_name)
             await self._update_connection(camera_id, is_connected=False, error_message=str(e))
             return False
+        finally:
+            clear_camera_context()
 
     def get_active_streams(self) -> list["StreamProcess"]:
         """Get list of all active streams."""
