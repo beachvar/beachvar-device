@@ -1557,12 +1557,14 @@ class StreamManager:
         ]
 
         logger.info(f"Starting YouTube FFmpeg for {camera_name}: HLS -> YouTube")
-        logger.debug(f"YouTube FFmpeg command: {' '.join(cmd[:6])}... -> {rtmp_url}/[HIDDEN]")
+        # Log full command for debugging (hide stream key)
+        cmd_debug = " ".join(cmd).replace(stream_key, "[STREAM_KEY]")
+        logger.info(f"YouTube FFmpeg command: {cmd_debug}")
 
         try:
             process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
 
@@ -1573,6 +1575,23 @@ class StreamManager:
 
             # Remove from failed set if this is a retry
             self._youtube_failed_broadcasts.discard(broadcast_id)
+
+            # Wait a moment and check if process is still running
+            await asyncio.sleep(2)
+            if process.poll() is not None:
+                # Process already exited - get error output
+                _, stderr = process.communicate()
+                error_output = stderr.decode("utf-8", errors="ignore") if stderr else ""
+                logger.error(f"YouTube FFmpeg for {camera_name} exited immediately with code {process.returncode}")
+                logger.error(f"FFmpeg stderr: {error_output[-1000:]}")
+
+                del self._youtube_streams[broadcast_id]
+                await self._update_youtube_broadcast_status(
+                    broadcast_id,
+                    status="error",
+                    error_message=f"FFmpeg exited with code {process.returncode}: {error_output[-200:]}",
+                )
+                return False
 
             # Start log reader task for YouTube FFmpeg
             log_task = asyncio.create_task(
