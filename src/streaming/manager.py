@@ -1538,7 +1538,8 @@ class StreamManager:
         cmd = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "info",  # More verbose to debug connection issues
+            "-loglevel", "warning",  # Only warnings and errors
+            "-stats",  # Show encoding progress stats
 
             # Input from HLS - use live_start_index to start from current position
             "-live_start_index", "-1",
