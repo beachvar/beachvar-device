@@ -1559,6 +1559,41 @@ class StreamManager:
     # YouTube log reader tasks: {broadcast_id: asyncio.Task}
     _youtube_log_tasks: dict[str, asyncio.Task] = {}
 
+    def _hls_has_audio(self, hls_playlist: str) -> bool:
+        """
+        Check if HLS stream has audio using ffprobe.
+
+        Args:
+            hls_playlist: Path to the HLS playlist file
+
+        Returns:
+            True if audio stream exists, False otherwise
+        """
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v", "error",
+                    "-select_streams", "a",
+                    "-show_entries", "stream=codec_type",
+                    "-of", "csv=p=0",
+                    hls_playlist,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            # If there's audio, ffprobe will output "audio" for each audio stream
+            has_audio = "audio" in result.stdout.lower()
+            logger.info(f"HLS audio check: {'audio found' if has_audio else 'no audio'}")
+            return has_audio
+        except subprocess.TimeoutExpired:
+            logger.warning("ffprobe timeout checking for audio, assuming no audio")
+            return False
+        except Exception as e:
+            logger.warning(f"Error checking HLS audio: {e}, assuming no audio")
+            return False
+
     async def start_youtube_stream(
         self,
         camera_id: str,
@@ -1602,32 +1637,66 @@ class StreamManager:
             logger.info("Camera must be streaming locally (HLS mode) before starting YouTube stream")
             return False
 
+        # Check if HLS has audio
+        has_audio = self._hls_has_audio(hls_playlist)
+
         # Build FFmpeg command to re-stream HLS to YouTube RTMP
         full_rtmp_url = f"{rtmp_url}/{stream_key}"
 
-        cmd = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel", "warning",
+        if has_audio:
+            # HLS has audio - copy both video and audio
+            cmd = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "warning",
+                "-re",  # Read at native frame rate
 
-            # Input from HLS - use live_start_index to start from current position
-            "-live_start_index", "-1",
-            "-i", hls_playlist,
+                # Input from HLS
+                "-live_start_index", "-1",
+                "-i", hls_playlist,
 
-            # Copy video (no re-encoding needed)
-            "-c:v", "copy",
+                # Map and copy streams
+                "-map", "0:v:0",
+                "-map", "0:a:0",
+                "-c:v", "copy",
+                "-c:a", "copy",
 
-            # Audio: copy if exists, ignore if not (handles cameras without audio)
-            # The -map flags ensure we don't fail if audio is missing
-            "-map", "0:v:0",      # Map first video stream (required)
-            "-map", "0:a:0?",     # Map first audio stream if exists (optional)
-            "-c:a", "copy",       # Copy audio codec (only applies if audio exists)
+                # FLV output for RTMP
+                "-f", "flv",
+                "-flvflags", "no_duration_filesize",
+                full_rtmp_url,
+            ]
+            logger.info(f"YouTube FFmpeg: HLS has audio, copying both streams")
+        else:
+            # HLS has NO audio - generate silent audio (YouTube requires audio)
+            cmd = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "warning",
+                "-re",  # Read at native frame rate
 
-            # FLV output for RTMP
-            "-f", "flv",
-            "-flvflags", "no_duration_filesize",  # Required for live streaming
-            full_rtmp_url,
-        ]
+                # Input from HLS
+                "-live_start_index", "-1",
+                "-i", hls_playlist,
+
+                # Generate silent audio
+                "-f", "lavfi",
+                "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+
+                # Map video from HLS, audio from silent source
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-shortest",
+
+                # FLV output for RTMP
+                "-f", "flv",
+                "-flvflags", "no_duration_filesize",
+                full_rtmp_url,
+            ]
+            logger.info(f"YouTube FFmpeg: HLS has NO audio, generating silent audio for YouTube")
 
         logger.info(f"Starting YouTube FFmpeg for {camera_name}: HLS -> YouTube")
         # Log command with hidden stream key
