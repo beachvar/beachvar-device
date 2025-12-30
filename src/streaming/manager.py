@@ -240,11 +240,24 @@ class StreamManager:
         # Get set of locally running broadcast IDs
         local_broadcast_ids = set(self._youtube_streams.keys())
 
+        # Log sync state for debugging
+        if local_broadcast_ids or backend_broadcast_ids:
+            logger.debug(
+                f"YouTube sync: backend={len(backend_broadcast_ids)} broadcasts, "
+                f"local={len(local_broadcast_ids)} streams"
+            )
+
         # Find broadcasts to start (in backend but not running locally)
         broadcasts_to_start = backend_broadcast_ids - local_broadcast_ids
 
         # Find broadcasts to stop (running locally but not in backend anymore)
         broadcasts_to_stop = local_broadcast_ids - backend_broadcast_ids
+
+        if broadcasts_to_stop:
+            logger.warning(
+                f"YouTube sync: {len(broadcasts_to_stop)} broadcast(s) to stop "
+                f"(not in backend): {broadcasts_to_stop}"
+            )
 
         # Clean up "stopping" broadcasts that are no longer in backend
         # (backend has processed the stop request)
