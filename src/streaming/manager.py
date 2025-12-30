@@ -1608,7 +1608,7 @@ class StreamManager:
         cmd = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "verbose",  # Maximum verbosity for debugging
+            "-loglevel", "warning",
 
             # Input from HLS - use live_start_index to start from current position
             "-live_start_index", "-1",
@@ -1617,8 +1617,11 @@ class StreamManager:
             # Copy video (no re-encoding needed)
             "-c:v", "copy",
 
-            # Audio: copy (HLS already has AAC from our transcoding)
-            "-c:a", "copy",
+            # Audio: copy if exists, ignore if not (handles cameras without audio)
+            # The -map flags ensure we don't fail if audio is missing
+            "-map", "0:v:0",      # Map first video stream (required)
+            "-map", "0:a:0?",     # Map first audio stream if exists (optional)
+            "-c:a", "copy",       # Copy audio codec (only applies if audio exists)
 
             # FLV output for RTMP
             "-f", "flv",
