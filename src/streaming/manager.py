@@ -808,6 +808,10 @@ class StreamManager:
                             x in text.lower() for x in ["error", "fatal", "failed"]
                         ) else "warning" if "warning" in text.lower() else "info"
 
+                        # Log YouTube FFmpeg output to main logger for visibility
+                        if process_type == "youtube":
+                            logger.info(f"[YouTube FFmpeg {camera_name}] {text}")
+
                         # Send to camera-specific logs
                         await log_manager.add_log(camera_id, text, level, camera_name)
 
