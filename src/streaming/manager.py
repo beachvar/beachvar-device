@@ -968,7 +968,7 @@ class StreamManager:
         camera_id: str,
         is_connected: bool,
         error_message: Optional[str] = None,
-        retries: int = 3,
+        retries: int = 2,
     ) -> bool:
         """Update camera connection status on backend with retry logic."""
         camera = self._cameras.get(camera_id)
@@ -976,7 +976,9 @@ class StreamManager:
 
         for attempt in range(retries):
             try:
-                async with aiohttp.ClientSession() as session:
+                async with aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as session:
                     url = f"{self.backend_url}/api/v1/device/cameras/{camera_id}/connection/"
                     payload = {"is_connected": is_connected}
                     if error_message:
@@ -988,8 +990,10 @@ class StreamManager:
                         json=payload
                     ) as resp:
                         if resp.status == 200:
-                            status_str = "connected" if is_connected else "disconnected"
-                            logger.info(f"Updated connection for {camera_name} to {status_str}")
+                            # Only log disconnections or errors, not routine heartbeats
+                            if not is_connected or error_message:
+                                status_str = "connected" if is_connected else "disconnected"
+                                logger.info(f"Updated connection for {camera_name} to {status_str}")
                             return True
                         elif resp.status == 404:
                             # Camera was deleted from backend - clean up locally
@@ -1006,13 +1010,19 @@ class StreamManager:
                                 f"{resp.status} - {error} (attempt {attempt + 1}/{retries})"
                             )
                             if attempt < retries - 1:
-                                await asyncio.sleep(0.5 * (attempt + 1))  # Backoff
-            except Exception as e:
-                logger.error(f"Error updating connection for {camera_name}: {e} (attempt {attempt + 1}/{retries})")
+                                await asyncio.sleep(1)
+            except asyncio.TimeoutError:
+                logger.debug(f"Timeout updating connection for {camera_name} (attempt {attempt + 1}/{retries})")
                 if attempt < retries - 1:
-                    await asyncio.sleep(0.5 * (attempt + 1))
+                    await asyncio.sleep(1)
+            except Exception as e:
+                logger.debug(f"Error updating connection for {camera_name}: {e} (attempt {attempt + 1}/{retries})")
+                if attempt < retries - 1:
+                    await asyncio.sleep(1)
 
-        logger.error(f"Failed to update connection for {camera_name} after {retries} attempts")
+        # Only log error for important updates (disconnections), not heartbeats
+        if not is_connected or error_message:
+            logger.error(f"Failed to update connection for {camera_name} after {retries} attempts")
         return False
 
     async def _cleanup_deleted_camera(self, camera_id: str) -> None:
@@ -1065,11 +1075,11 @@ class StreamManager:
         # Phase 3: Long-term recovery (after 30+ attempts)
         long_term_retry_delay = 300  # 5 minutes between attempts
 
-        health_check_interval = 30  # Full health check every 30 seconds
+        health_check_interval = 60  # Full health check every 60 seconds
         stable_stream_threshold = 120  # Reset retries after 2 minutes of stable stream
         url_refresh_interval = 6 * 3600  # Refresh HLS URLs every 6 hours (half of 12h expiry)
-        stream_heartbeat_interval = 10  # Send heartbeat to backend every 10 seconds
-        youtube_heartbeat_interval = 30  # Send YouTube heartbeat every 30 seconds
+        stream_heartbeat_interval = 30  # Send heartbeat to backend every 30 seconds
+        youtube_heartbeat_interval = 60  # Send YouTube heartbeat every 60 seconds
         last_health_check = 0
         last_url_refresh: dict[str, float] = {}  # Track last URL refresh per camera
         last_stream_heartbeat: dict[str, float] = {}  # Track last heartbeat per camera
@@ -1184,16 +1194,23 @@ class StreamManager:
                         await self._refresh_hls_url(camera_id)
                         last_url_refresh[camera_id] = current_time
 
-                # Send connection heartbeats to backend (every 10 seconds)
+                # Send connection heartbeats to backend in batch (fire-and-forget)
+                heartbeat_tasks = []
                 for camera_id, stream in list(self._streams.items()):
                     if not stream.is_running:
                         continue
 
                     last_hb = last_stream_heartbeat.get(camera_id, 0)
                     if current_time - last_hb >= stream_heartbeat_interval:
-                        # Send heartbeat (just update connection to keep it alive)
-                        await self._update_connection(camera_id, is_connected=True)
+                        # Queue heartbeat task (don't await individually)
+                        heartbeat_tasks.append(
+                            self._update_connection(camera_id, is_connected=True)
+                        )
                         last_stream_heartbeat[camera_id] = current_time
+
+                # Run all heartbeats in parallel
+                if heartbeat_tasks:
+                    await asyncio.gather(*heartbeat_tasks, return_exceptions=True)
 
                 # Monitor YouTube streams for failures
                 for broadcast_id, process in list(self._youtube_streams.items()):
