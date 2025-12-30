@@ -1517,7 +1517,12 @@ class StreamManager:
         cmd = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "warning",
+            "-loglevel", "info",  # More verbose to debug connection issues
+
+            # Reconnect options for RTMP output
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
 
             # Input from HLS - use live_start_index to start from current position
             "-live_start_index", "-1",
@@ -1526,14 +1531,13 @@ class StreamManager:
             # Copy video (no re-encoding needed)
             "-c:v", "copy",
 
-            # Re-encode audio to fix timestamp issues and normalize for YouTube
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-ar", "44100",
-            "-af", "aresample=async=1000",  # Sync audio timestamps, fix gaps/drift
+            # Audio: copy if available (HLS already has AAC from our transcoding)
+            # Use -c:a copy since HLS output already has proper AAC audio
+            "-c:a", "copy",
 
             # FLV output for RTMP
             "-f", "flv",
+            "-flvflags", "no_duration_filesize",  # Required for live streaming
             full_rtmp_url,
         ]
 
