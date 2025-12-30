@@ -710,16 +710,18 @@ class StreamManager:
         """
         URL encode password in RTSP URL to handle special characters.
 
-        Handles URLs like: rtsp://user:pass!word@host:port/path
+        Handles URLs like: rtsp://user:pass@word!@host:port/path
+        where password contains @ or other special characters.
 
         If password is already URL-encoded (contains %XX patterns), it's
         first decoded to avoid double-encoding.
         """
         from urllib.parse import unquote
 
-        # Parse the URL
+        # Parse the URL - match last @ before host:port or host/path
+        # This handles passwords containing @ like "Hestia!@#$"
         match = re.match(
-            r'^(rtsp://)?([^:]+):([^@]+)@(.+)$',
+            r'^(rtsp://)?([^:]+):(.+)@(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}[:/].*)$',
             rtsp_url
         )
 
