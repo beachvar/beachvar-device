@@ -1630,8 +1630,8 @@ class StreamManager:
         ]
 
         logger.info(f"Starting YouTube FFmpeg for {camera_name}: HLS -> YouTube")
-        # Log full command for debugging (including stream key for troubleshooting)
-        cmd_debug = " ".join(cmd)
+        # Log command with hidden stream key
+        cmd_debug = " ".join(cmd).replace(stream_key, "[STREAM_KEY]")
         logger.info(f"YouTube FFmpeg command: {cmd_debug}")
 
         try:
