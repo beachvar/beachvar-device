@@ -854,6 +854,63 @@ class StreamManager:
         except Exception as e:
             logger.error(f"Error reading FFmpeg logs for {camera_name}: {e}")
 
+    async def _read_youtube_ffmpeg_logs(
+        self,
+        camera_name: str,
+        process: subprocess.Popen,
+    ) -> None:
+        """
+        Read YouTube FFmpeg output (stdout with merged stderr) and log it.
+        """
+        loop = asyncio.get_event_loop()
+        line_count = 0
+
+        try:
+            while process.poll() is None:
+                # Read stdout in thread to avoid blocking
+                line = await loop.run_in_executor(
+                    None,
+                    lambda: process.stdout.readline() if process.stdout else b""
+                )
+
+                if not line:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                try:
+                    text = line.decode("utf-8", errors="ignore").strip()
+                    if text:
+                        line_count += 1
+                        # Log first 20 lines and then every 100th line, plus errors
+                        is_error = any(x in text.lower() for x in ["error", "fatal", "failed"])
+                        if line_count <= 20 or line_count % 100 == 0 or is_error:
+                            logger.log(
+                                logging.ERROR if is_error else logging.INFO,
+                                f"[YouTube FFmpeg {camera_name}] {text}"
+                            )
+                except Exception:
+                    pass
+
+            # Process ended - read remaining output
+            if process.stdout:
+                remaining = process.stdout.read()
+                if remaining:
+                    text = remaining.decode("utf-8", errors="ignore").strip()
+                    if text:
+                        logger.info(f"[YouTube FFmpeg {camera_name}] Final output:\n{text[-500:]}")
+
+            # Log exit code
+            exit_code = process.returncode
+            if exit_code != 0:
+                logger.error(f"[YouTube FFmpeg {camera_name}] Exited with code {exit_code}")
+            else:
+                logger.info(f"[YouTube FFmpeg {camera_name}] Exited normally")
+
+        except asyncio.CancelledError:
+            logger.info(f"[YouTube FFmpeg {camera_name}] Log reader cancelled")
+        except Exception as e:
+            logger.error(f"[YouTube FFmpeg {camera_name}] Error reading logs: {e}")
+
     def _build_hls_ffmpeg_cmd(self, camera: CameraConfig, rtsp_url: str) -> list[str]:
         """Build FFmpeg command for local HLS output."""
         import os
@@ -1538,8 +1595,7 @@ class StreamManager:
         cmd = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "warning",  # Only warnings and errors
-            "-stats",  # Show encoding progress stats
+            "-loglevel", "verbose",  # Maximum verbosity for debugging
 
             # Input from HLS - use live_start_index to start from current position
             "-live_start_index", "-1",
@@ -1563,10 +1619,11 @@ class StreamManager:
         logger.info(f"YouTube FFmpeg command: {cmd_debug}")
 
         try:
+            # Use subprocess with merged stderr for simpler handling
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Merge stderr into stdout
             )
 
             self._youtube_streams[broadcast_id] = process
@@ -1577,14 +1634,17 @@ class StreamManager:
             # Remove from failed set if this is a retry
             self._youtube_failed_broadcasts.discard(broadcast_id)
 
-            # Wait a moment and check if process is still running
-            await asyncio.sleep(2)
+            # Wait and collect initial output for 5 seconds
+            logger.info(f"Waiting 5s for YouTube FFmpeg initial output...")
+            await asyncio.sleep(5)
+
+            # Check if process is still running
             if process.poll() is not None:
                 # Process already exited - get error output
-                _, stderr = process.communicate()
-                error_output = stderr.decode("utf-8", errors="ignore") if stderr else ""
-                logger.error(f"YouTube FFmpeg for {camera_name} exited immediately with code {process.returncode}")
-                logger.error(f"FFmpeg stderr: {error_output[-1000:]}")
+                output = process.stdout.read() if process.stdout else b""
+                error_output = output.decode("utf-8", errors="ignore")
+                logger.error(f"YouTube FFmpeg for {camera_name} exited with code {process.returncode}")
+                logger.error(f"FFmpeg output:\n{error_output}")
 
                 del self._youtube_streams[broadcast_id]
                 await self._update_youtube_broadcast_status(
@@ -1594,13 +1654,18 @@ class StreamManager:
                 )
                 return False
 
-            # Start log reader task for YouTube FFmpeg
+            # Read any available output without blocking
+            import select
+            if process.stdout and select.select([process.stdout], [], [], 0)[0]:
+                initial_output = process.stdout.read(4096)
+                if initial_output:
+                    logger.info(f"YouTube FFmpeg initial output:\n{initial_output.decode('utf-8', errors='ignore')}")
+
+            # Start log reader task for YouTube FFmpeg (reads from stdout since we merged)
             log_task = asyncio.create_task(
-                self._read_ffmpeg_logs(
-                    camera_id=camera_id,
+                self._read_youtube_ffmpeg_logs(
                     camera_name=camera_name,
                     process=process,
-                    process_type="youtube",
                 )
             )
             self._youtube_log_tasks[broadcast_id] = log_task
