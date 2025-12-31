@@ -15,12 +15,17 @@ class CameraCreateDTO(BaseModel):
     name: str
     rtsp_url: str
     court_id: str
+    recording_duration_seconds: Optional[int] = None
+    hls_playback_delay_seconds: Optional[int] = None
 
 
 class CameraUpdateDTO(BaseModel):
     """DTO for updating a camera."""
     name: Optional[str] = None
     rtsp_url: Optional[str] = None
+    court_id: Optional[str] = None
+    recording_duration_seconds: Optional[int] = None
+    hls_playback_delay_seconds: Optional[int] = None
 
 
 def _get_hls_url(cam, is_connected: bool) -> str:
@@ -55,6 +60,8 @@ class CamerasController(Controller):
                     "is_connected": cam.id in stream_manager.active_streams,
                     "last_seen_at": cam.last_seen_at,
                     "connection_error": None,
+                    "recording_duration_seconds": cam.recording_duration_seconds,
+                    "hls_playback_delay_seconds": cam.hls_playback_delay_seconds,
                 }
                 for cam in cameras
             ],
@@ -81,6 +88,8 @@ class CamerasController(Controller):
             "is_connected": is_connected,
             "last_seen_at": camera.last_seen_at,
             "connection_error": None,
+            "recording_duration_seconds": camera.recording_duration_seconds,
+            "hls_playback_delay_seconds": camera.hls_playback_delay_seconds,
         }
 
     @post("/")
@@ -107,6 +116,8 @@ class CamerasController(Controller):
             "complex_name": camera.complex_name,
             "hls_url": "",
             "is_connected": False,
+            "recording_duration_seconds": camera.recording_duration_seconds,
+            "hls_playback_delay_seconds": camera.hls_playback_delay_seconds,
         }
 
     @patch("/{camera_id:str}")
@@ -120,6 +131,15 @@ class CamerasController(Controller):
             update_data["name"] = data.name
         if data.rtsp_url is not None:
             update_data["rtsp_url"] = data.rtsp_url
+        if data.court_id is not None:
+            update_data["court_id"] = data.court_id
+        if data.recording_duration_seconds is not None:
+            update_data["recording_duration_seconds"] = data.recording_duration_seconds
+        elif hasattr(data, "recording_duration_seconds"):
+            # Allow setting to null explicitly
+            update_data["recording_duration_seconds"] = None
+        if data.hls_playback_delay_seconds is not None:
+            update_data["hls_playback_delay_seconds"] = data.hls_playback_delay_seconds
 
         if not update_data:
             raise HTTPException(status_code=400, detail="No fields to update")
@@ -134,6 +154,8 @@ class CamerasController(Controller):
             "rtsp_url": camera.rtsp_url,
             "court_id": camera.court_id,
             "court_name": camera.court_name,
+            "recording_duration_seconds": camera.recording_duration_seconds,
+            "hls_playback_delay_seconds": camera.hls_playback_delay_seconds,
         }
 
     @delete("/{camera_id:str}")

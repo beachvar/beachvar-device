@@ -475,6 +475,14 @@ class StreamManager:
                                 camera.name = camera_data["name"]
                             if "rtsp_url" in camera_data:
                                 camera.rtsp_url = camera_data["rtsp_url"]
+                            if "court_id" in camera_data:
+                                camera.court_id = camera_data["court_id"]
+                            if "court_name" in camera_data:
+                                camera.court_name = camera_data["court_name"]
+                            if "recording_duration_seconds" in camera_data:
+                                camera.recording_duration_seconds = camera_data["recording_duration_seconds"]
+                            if "hls_playback_delay_seconds" in camera_data:
+                                camera.hls_playback_delay_seconds = camera_data["hls_playback_delay_seconds"]
                             logger.info(f"Updated camera: {camera.name} ({camera.id})")
                         return camera
                     else:
